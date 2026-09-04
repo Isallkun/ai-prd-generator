@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PRD Maker — AI Project Requirements Generator</title>
+  
+  <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Main Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- ====================================================================
+         Top Navigation Header
+         ==================================================================== -->
+    <header class="app-header">
+      <div class="header-left">
+        <button class="menu-toggle-btn" id="btn-menu-toggle" title="Menu Sidebar">
+          ☰
+        </button>
+
+        <div class="brand-logo" id="brand-logo" title="Kembali ke Halaman Awal">
+          <div class="brand-icon">⚡</div>
+          <div class="brand-name">ngoding<span>cuy</span></div>
+        </div>
+        
+        <div class="header-divider" id="header-divider-project" style="display: none;"></div>
+        
+        <div class="project-title-badge" id="project-title-badge" style="display: none;" title="Klik untuk ubah nama proyek">
+          <span id="header-project-name">Nama Proyek</span>
+          <span class="project-edit-icon">✏️</span>
+        </div>
+      </div>
+
+      <!-- Center Pipeline Stepper -->
+      <div class="header-center">
+        <div class="pipeline-stepper">
+          <div class="step-item" id="step-struktur">
+            <span class="step-icon-dot" id="step-dot-1">•</span>
+            <span>Struktur</span>
+          </div>
+          <div class="step-connector" id="connector-1"></div>
+          
+          <div class="step-item" id="step-prd">
+            <span class="step-icon-dot" id="step-dot-2">•</span>
+            <span>PRD</span>
+          </div>
+          <div class="step-connector" id="connector-2"></div>
+          
+          <div class="step-item" id="step-task">
+            <span class="step-icon-dot" id="step-dot-3">•</span>
+            <span>Task</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Header Actions -->
+      <div class="header-right">
+        
+        <!-- OpenClaw Bridge Server Status Indicator -->
+        <div class="openclaw-status-pill offline" id="openclaw-status-pill" title="Status Koneksi Server OpenClaw">
+          <span class="openclaw-status-dot"></span>
+          <span id="openclaw-status-text">OpenClaw: Offline</span>
+        </div>
+
+        <!-- Workspace View Switcher Tabs (Shown when inside project) -->
+        <div class="view-tabs" id="workspace-view-tabs" style="display: none;">
+          <button class="view-tab-btn active" id="tab-prd">
+            <span>📄</span> PRD
+          </button>
+          <button class="view-tab-btn" id="tab-mindmap">
+            <span>🗺️</span> Roadmap
+          </button>
+          <button class="view-tab-btn" id="tab-tasks">
+            <span>📋</span> Semua Task
+          </button>
+          <button class="view-tab-btn" id="tab-scope">
+            <span>📊</span> Scope & Biaya
+          </button>
+        </div>
+
+        <button class="header-action-btn" id="btn-refresh" style="display: none;" title="Perbarui Data">
+          <span>🔄</span> Refresh
+        </button>
+
+        <!-- CTA "Mulai Implementasi" with Dropdown (prd4.PNG) -->
+        <div class="cta-dropdown-wrapper" id="cta-implementation-wrapper" style="display: none;">
+          <button class="btn-primary-cta" id="btn-mulai-implementasi">
+            <span>Mulai Implementasi</span>
+            <span style="font-size: 10px;">▼</span>
+          </button>
+
+          <div class="implementation-dropdown" id="implementation-dropdown">
+            <!-- Option 0: Jalankan di OpenClaw (Cloud AI) -->
+            <button class="dropdown-item agent-openclaw" id="action-run-openclaw">
+              <div class="dropdown-icon-box">⚡</div>
+              <div class="dropdown-text-group">
+                <div class="dropdown-title">Jalankan di OpenClaw</div>
+                <div class="dropdown-desc">Eksekusi otomatis semua task via Cloud AI di server.</div>
+              </div>
+            </button>
+
+            <!-- Option 1: Download PRD -->
+            <button class="dropdown-item" id="action-download-prd">
+              <div class="dropdown-icon-box">📄</div>
+              <div class="dropdown-text-group">
+                <div class="dropdown-title">Download PRD</div>
+                <div class="dropdown-desc">Cuma dokumen PRD (.md).</div>
+              </div>
+            </button>
+
+            <!-- Option 2: Download ZIP -->
+            <button class="dropdown-item" id="action-download-zip">
+              <div class="dropdown-icon-box">📦</div>
+              <div class="dropdown-text-group">
+                <div class="dropdown-title">Download ZIP</div>
+                <div class="dropdown-desc">PRD + spesifikasi fitur & task (.zip).</div>
+              </div>
+            </button>
+
+            <!-- Option 3: Scope of Work & Quotation -->
+            <button class="dropdown-item" id="action-view-sow">
+              <div class="dropdown-icon-box">📊</div>
+              <div class="dropdown-text-group">
+                <div class="dropdown-title">Scope of Work & Quotation</div>
+                <div class="dropdown-desc">Breakdown modul, spesifikasi server & estimasi biaya.</div>
+              </div>
+            </button>
+
+            <!-- Option 4: Prompt AI Agent (Featured) -->
+            <button class="dropdown-item featured" id="action-prompt-agent">
+              <div class="dropdown-icon-box">🤖</div>
+              <div class="dropdown-text-group">
+                <div class="dropdown-title">Prompt AI agent</div>
+                <div class="dropdown-desc">Suruh AI agent kerjakan semua task lewat CLI.</div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Initial User Profile Badge (tampilan_awal.PNG) -->
+        <div class="user-profile-badge" id="user-profile-badge">
+          <span class="pro-pill">Pro</span>
+          <div class="user-avatar-circle" title="Akun User">R</div>
+        </div>
+
+      </div>
+    </header>
+
+    <!-- ====================================================================
+         Main Views Container
+         ==================================================================== -->
+    <main class="main-view-container">
+
+      <!-- ================================================================
+           VIEW 0: TAMPILAN AWAL / LANDING GENERATOR (tampilan_awal.PNG)
+           ================================================================ -->
+      <section class="view-section active" id="view-initial">
+        <div class="view-initial-layout">
+          
+          <!-- Hero Title & Subtitle -->
+          <div class="initial-hero-group">
+            <h1 class="initial-hero-title">
+              <span>Mau bikin apa?</span>
+              <span class="hero-doc-badge">📄</span>
+            </h1>
+            <p class="initial-hero-subtitle">
+              Ubah Ide kamu menjadi rencana yang bisa dipahami AI tools pilihanmu. 
+              <span class="sample-prd-chip" id="chip-sample-prd">contoh_prd.md 📄</span>
+              <span class="sample-prd-chip" id="chip-sample-scope" style="background: rgba(56,189,248,0.12); color: #38bdf8; border: 1px solid rgba(56,189,248,0.3); margin-left: 6px;">📊 scope_dan_biaya.sow</span>
+            </p>
+          </div>
+
+          <!-- Centered Prompt Card (tampilan_awal.PNG) -->
+          <div class="initial-prompt-card">
+            <textarea 
+              class="initial-prompt-textarea" 
+              id="initial-prompt-input" 
+              placeholder="Contoh: &quot;Aplikasi tracking pengeluaran harian, bisa input lewat WhatsApp, ada dashboard ringkasan bulanan...&quot;"></textarea>
+
+            <div class="initial-prompt-bottom-row">
+              <div class="initial-toolbar-left">
+                <button class="prompt-util-btn" id="btn-attach-ref">
+                  <span>🔗</span> Referensi
+                </button>
+                <button class="prompt-util-btn" id="btn-select-lang">
+                  <span>🌐</span> Bahasa Indonesia ▾
+                </button>
+              </div>
+
+              <button class="btn-generate-arrow" id="btn-submit-initial-prompt" title="Generate PRD & Tasks">
+                ↑
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Template Suggestion Chips -->
+          <div class="quick-templates-group">
+            <span class="template-chip-pill" data-idea="Platform booking lapangan padel cepat dengan kalender live, payment gateway QRIS, dan notifikasi WhatsApp tiket otomatis">
+              🏸 Booking Lapangan Padel
+            </span>
+            <span class="template-chip-pill" data-idea="Aplikasi POS kasir toko kelontong pintar dengan scan barcode, cetak struk bluetooth, dan laporan laba rugi">
+              🏪 POS Kasir Toko Kelontong
+            </span>
+            <span class="template-chip-pill" data-idea="Aplikasi bot WhatsApp pencatat pengeluaran harian otomatis terintegrasi Google Sheets dan Dashboard Finansial">
+              💰 Expense Tracker via WhatsApp
+            </span>
+            <span class="template-chip-pill" data-idea="Sistem antrean online klinik dokter dengan nomor antrean realtime via WA dan rekam medis digital">
+              🏥 Antrean Klinik Online
+            </span>
+            <span class="template-chip-pill" data-idea="Aplikasi SaaS CRM Sales Pipeline dengan visual Kanban dan integrasi otomatisasi follow-up leads">
+              💼 SaaS CRM Sales Pipeline
+            </span>
+          </div>
+
+          <!-- Bottom History Link -->
+          <button class="initial-history-link" id="btn-open-history">
+            <span>🕒</span> Lihat PRD sebelumnya
+          </button>
+
+        </div>
+      </section>
+
+      <!-- ================================================================
+           VIEW 1: PRD Document View (Reference: prd1.PNG)
+           ================================================================ -->
+      <section class="view-section" id="view-prd">
+        <div class="prd-view-layout">
+          
+          <!-- Left Navigation Sidebar -->
+          <aside class="prd-sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-title">PRD — Project Requirements</div>
+              <div class="sidebar-subtitle">Document Navigator</div>
+            </div>
+
+            <!-- Dynamically populated by JS -->
+            <ul class="sidebar-nav-list" id="prd-sidebar-nav">
+              <!-- Rendered dynamically -->
+            </ul>
+
+            <div class="sidebar-footer">
+              <div class="sidebar-action-icon" id="btn-sidebar-new" title="Proyek Baru">➕</div>
+              <div class="sidebar-action-icon" id="btn-sidebar-history" title="History Generasi">🕒</div>
+              <div class="sidebar-action-icon" title="Setting AI Provider">⚙️</div>
+              <div class="sidebar-action-icon" title="Salin Link">🔗</div>
+            </div>
+          </aside>
+
+          <!-- Center Document Viewer -->
+          <div class="prd-doc-content-area">
+            <div class="doc-max-container" id="prd-doc-body">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+
+          <!-- Right AI Assistant Panel (prd1.PNG) -->
+          <aside class="prd-ai-sidebar">
+            <div class="ai-status-card">
+              <div class="ai-status-title">
+                <span>PRD-mu sudah siap ✅</span>
+              </div>
+              <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 12px;">Lanjut susun fitur & task?</p>
+
+              <div class="ai-checklist">
+                <div class="checklist-row done">
+                  <span class="check-dot">✓</span>
+                  <span>Menyusun PRD</span>
+                </div>
+                <div class="checklist-row done">
+                  <span class="check-dot">✓</span>
+                  <span>Menyusun fitur & sub-fitur</span>
+                </div>
+                <div class="checklist-row done">
+                  <span class="check-dot">✓</span>
+                  <span>Menyusun spesifikasi & task</span>
+                </div>
+              </div>
+
+              <button class="btn-create-tasks-cta" id="btn-bikin-task-cta">
+                Buka Board Task ›
+              </button>
+            </div>
+
+            <!-- Achievement / Summary Badge (Dynamic) -->
+            <div class="ai-summary-banner" id="ai-summary-banner">
+              <strong>✨ Selesai!</strong> PRD dan antrean task telah siap di-generate.
+            </div>
+
+            <!-- Quick Ask AI Bar -->
+            <div class="ai-ask-input-box">
+              <input type="text" class="ai-ask-input" id="ai-quick-question-input" placeholder="Tanyakan tentang PRD/fitur ini..." />
+              <button class="ai-send-btn" id="btn-ai-quick-send">➔</button>
+            </div>
+          </aside>
+
+        </div>
+      </section>
+
+      <!-- ================================================================
+           VIEW 2: Interactive Mind Map Canvas (Reference: prd2.PNG)
+           ================================================================ -->
+      <section class="view-section" id="view-mindmap">
+        <div class="mindmap-view-layout">
+          
+          <!-- Left Requirements Summary Card (Dynamic) -->
+          <aside class="mindmap-left-panel">
+            <h2 class="requirements-card-title">Requirements</h2>
+            <div class="requirements-card-body" id="mindmap-req-text">
+              <!-- Dynamically populated from project problem statement -->
+            </div>
+
+            <div style="margin-top: auto; display: flex; flex-direction: column; gap: 8px;">
+              <button class="header-action-btn" id="btn-lihat-roadmap-cta" style="justify-content: center;">
+                <span>📋</span> Lihat Task Terkait
+              </button>
+            </div>
+          </aside>
+
+          <!-- Interactive Canvas Area -->
+          <div class="mindmap-canvas-container" id="mindmap-canvas">
+            
+            <!-- Canvas Toolbar Controls -->
+            <div class="canvas-toolbar">
+              <button class="canvas-tool-btn active" title="View Mode">👁️</button>
+              <button class="canvas-tool-btn" title="Inspect JSON / Code">&lt;/&gt;</button>
+              <button class="canvas-tool-btn" title="Share Mind Map">🔗</button>
+              <button class="canvas-tool-btn" title="Fullscreen">⛶</button>
+              <button class="canvas-tool-btn" title="Reset Zoom">✕</button>
+            </div>
+
+            <!-- Toast Helper in Canvas (Dynamic) -->
+            <div class="canvas-toast-banner" id="canvas-toast-banner">
+              ✨ <strong>Selesai!</strong> Roadmap fitur dan task telah terhubung.
+            </div>
+
+            <!-- Node Tree Surface -->
+            <div class="mindmap-tree-surface" id="mindmap-tree">
+              <!-- SVG Curves Layer -->
+              <svg class="svg-connectors-layer" id="svg-connectors"></svg>
+              <!-- Nodes rendered dynamically via JS -->
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ================================================================
+           VIEW 3: Kanban Task Board (Reference: prd3.PNG)
+           ================================================================ -->
+      <section class="view-section" id="view-tasks">
+        <div class="tasks-view-layout">
+          
+          <!-- Top Subtitle and Controls -->
+          <div class="kanban-top-bar">
+            <div class="kanban-info-note">
+              Status task diperbarui otomatis oleh agent saat mengerjakan lewat CLI dan langsung muncul di board ini — kamu tidak perlu mengubahnya manual.
+            </div>
+
+            <div class="kanban-controls-row">
+              <div class="kanban-left-controls">
+                <!-- Dynamically populated filter -->
+                <select class="filter-select" id="kanban-filter">
+                  <!-- Rendered dynamically -->
+                </select>
+
+                <div class="kanban-progress-wrapper">
+                  <div class="progress-track">
+                    <div class="progress-fill" id="kanban-progress-bar"></div>
+                  </div>
+                  <span class="progress-text-label" id="kanban-progress-text">0/0 selesai</span>
+                </div>
+              </div>
+
+              <div class="kanban-right-actions">
+                <button class="btn-open-monitor" id="btn-open-monitor" title="Buka Live Terminal Monitor OpenClaw">
+                  <span>🖥️</span> Monitor Agent
+                </button>
+                <button class="btn-simulate-ai" id="btn-simulate-ai" title="Jalankan simulasi otomatisasi pengerjaan task oleh CLI agent">
+                  <span>▶️</span> Simulasi AI Agent
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Kanban 4 Columns Grid -->
+          <div class="kanban-columns-grid">
+            
+            <!-- Column 1: Belum Mulai -->
+            <div class="kanban-column col-todo">
+              <div class="column-header">
+                <div class="column-title-group">
+                  <span class="column-status-icon"></span>
+                  <span>Belum mulai</span>
+                </div>
+                <span class="column-counter-badge" id="badge-todo-count">0</span>
+              </div>
+              <div class="column-card-list" id="col-todo-list" data-status="todo">
+                <!-- Task Cards -->
+              </div>
+            </div>
+
+            <!-- Column 2: Dikerjakan -->
+            <div class="kanban-column col-progress">
+              <div class="column-header">
+                <div class="column-title-group">
+                  <span class="column-status-icon">🟡</span>
+                  <span>Dikerjakan</span>
+                </div>
+                <span class="column-counter-badge" id="badge-progress-count">0</span>
+              </div>
+              <div class="column-card-list" id="col-progress-list" data-status="progress">
+                <div class="empty-col-placeholder">Kosong</div>
+              </div>
+            </div>
+
+            <!-- Column 3: Selesai -->
+            <div class="kanban-column col-done">
+              <div class="column-header">
+                <div class="column-title-group">
+                  <span class="column-status-icon">🟢</span>
+                  <span>Selesai</span>
+                </div>
+                <span class="column-counter-badge" id="badge-done-count">0</span>
+              </div>
+              <div class="column-card-list" id="col-done-list" data-status="done">
+                <div class="empty-col-placeholder">Kosong</div>
+              </div>
+            </div>
+
+            <!-- Column 4: Gagal -->
+            <div class="kanban-column col-failed">
+              <div class="column-header">
+                <div class="column-title-group">
+                  <span class="column-status-icon">🔴</span>
+                  <span>Gagal</span>
+                </div>
+                <span class="column-counter-badge" id="badge-failed-count">0</span>
+              </div>
+              <div class="column-card-list" id="col-failed-list" data-status="failed">
+                <div class="empty-col-placeholder">Kosong</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           VIEW 4: Scope of Work & Pricing Breakdown View
+           ================================================================ -->
+      <section class="view-section" id="view-scope">
+        <div class="scope-view-layout">
+          
+          <!-- Top Control Header -->
+          <div class="scope-top-bar">
+            <div class="scope-header-info">
+              <div class="scope-title-group">
+                <span class="scope-badge">SCOPE OF WORK & QUOTATION</span>
+                <h2 class="scope-main-title" id="scope-project-title">Rincian Modul & Estimasi Biaya Proyek</h2>
+              </div>
+              <p class="scope-subtitle">
+                Breakdown spesifikasi fitur fungsional, modul operasional, layanan implementasi, dan infrastruktur server sesuai kebutuhan sistem.
+              </p>
+            </div>
+
+            <div class="scope-header-actions">
+              <button class="btn-primary-cta" id="btn-download-scope-pdf" title="Download File PDF Langsung">
+                <span>📥</span> Download PDF
+              </button>
+              <button class="header-action-btn" id="btn-export-scope-pdf" title="Buka Dialog Cetak / Print">
+                <span>🖨️</span> Cetak
+              </button>
+              <button class="header-action-btn" id="btn-export-scope-csv" title="Download Spreadsheet CSV">
+                <span>📊</span> Export CSV
+              </button>
+              <button class="header-action-btn" id="btn-preview-formal-sow" title="Buka Dokumen Formal SOW">
+                <span>📑</span> Dokumen SOW
+              </button>
+              <button class="header-action-btn" id="btn-add-scope-item" title="Tambah Baris Modul / Biaya">
+                <span>➕ Tambah Modul</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- KPI Summary Cards -->
+          <div class="scope-kpi-grid">
+            <div class="scope-kpi-card highlight">
+              <div class="kpi-label">TOTAL ESTIMASI BIAYA</div>
+              <div class="kpi-val" id="kpi-total-cost">Rp 0</div>
+              <div class="kpi-subtext" id="kpi-item-count">0 item modul aktif</div>
+            </div>
+            <div class="scope-kpi-card">
+              <div class="kpi-label">INFRASTRUKTUR SERVER</div>
+              <div class="kpi-val" style="font-size: 1.05rem; color: #38bdf8;">Ubuntu 8 Core / 32 GB RAM</div>
+              <div class="kpi-subtext">Kapasitas 60 Concurrent Users • 100 GB Cloud Storage</div>
+            </div>
+            <div class="scope-kpi-card">
+              <div class="kpi-label">SKEMA LISENSI & DUKUNGAN</div>
+              <div class="kpi-val" style="font-size: 1.05rem; color: #34d399;">Unlimited User License</div>
+              <div class="kpi-subtext">Garansi & Support: WA, Email, Call, Ticketing</div>
+            </div>
+            <div class="scope-kpi-card">
+              <div class="kpi-label">IMPLEMENTASI & TRAINING</div>
+              <div class="kpi-val" style="font-size: 1.05rem; color: #fbbf24;">4 Sesi / Modul (@3 Jam)</div>
+              <div class="kpi-subtext">FRD Creation, Migration, Standard Template</div>
+            </div>
+          </div>
+
+          <!-- Module Scope Accordions & Interactive Table -->
+          <div class="scope-table-wrapper" id="scope-table-container">
+            <!-- Rendered dynamically by JS -->
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ====================================================================
+         AI Generation Loading Overlay
+         ==================================================================== -->
+    <div class="generation-loading-overlay" id="generation-loading-overlay">
+      <div class="ai-pulse-orb">⚡</div>
+      <div class="generation-status-text" id="generation-status-text">Sedang menganalisis ide produk...</div>
+      <div class="generation-subtext" id="generation-subtext">AI sedang merancang arsitektur, 4 fitur, dan 40+ tasks</div>
+    </div>
+
+    <!-- ====================================================================
+         Modal 1: Prompt AI Agent (prd4.PNG & CLI Integration)
+         ==================================================================== -->
+    <div class="modal-backdrop" id="modal-prompt">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title">
+            <span>🤖</span> Prompt AI Agent CLI
+          </div>
+          <button class="modal-close-btn modal-close-trigger">✕</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 0.85rem; color: var(--text-secondary);">
+            Salin prompt di bawah ini dan tempelkan ke terminal AI Agent kamu (Antigravity CLI / Claude Code / Cursor / Aider) untuk mulai mengeksekusi semua task secara otomatis.
+          </p>
+
+          <pre class="prompt-terminal-box" id="prompt-terminal-text">
+            <!-- Generated via JS -->
+          </pre>
+        </div>
+        <div class="modal-footer">
+          <button class="header-action-btn modal-close-trigger">Tutup</button>
+          <button class="btn-primary-cta" id="btn-copy-prompt">
+            <span>📋 Salin Prompt ke Clipboard</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         Modal 2: History PRD Modal ("Lihat PRD sebelumnya")
+         ==================================================================== -->
+    <div class="modal-backdrop" id="modal-history">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title">
+            <span>🕒</span> PRD Sebelumnya
+          </div>
+          <button class="modal-close-btn modal-close-trigger">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="history-project-list" id="history-project-list">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="header-action-btn modal-close-trigger">Tutup</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         Modal 2.2: AI Requirement Deep-Dive Interview (Interactive Stepper)
+         ==================================================================== -->
+    <div class="modal-backdrop" id="modal-requirement-interview">
+      <div class="modal-dialog large" style="max-width: 660px;">
+        <div class="modal-header" style="flex-direction: column; align-items: stretch; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 14px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+            <div class="modal-title" style="font-size: 1rem;">
+              <span>🧠</span> AI Requirement Interview
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="interview-step-badge" id="interview-step-badge">Langkah 1 dari 4</span>
+              <button class="modal-close-btn modal-close-trigger">✕</button>
+            </div>
+          </div>
+
+          <!-- Progress Bar & Indicator -->
+          <div class="interview-stepper-bar">
+            <div class="interview-stepper-track">
+              <div class="interview-stepper-fill" id="interview-stepper-fill" style="width: 25%;"></div>
+            </div>
+            <div class="interview-stepper-dots" id="interview-stepper-dots">
+              <!-- Dynamically populated step dots -->
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-body" style="display: flex; flex-direction: column; min-height: 330px; padding: 18px 20px;">
+          
+          <!-- Stepper Slides Container -->
+          <div class="interview-steps-container" id="interview-steps-container">
+            
+            <!-- Slide 0: Tech Stack & Architecture -->
+            <div class="interview-slide active" data-step="0">
+              <div class="interview-slide-header">
+                <span class="interview-badge">Langkah 1 • Fondasi Arsitektur</span>
+                <h3 class="interview-slide-title">Pilih Target Tech Stack & Pendekatan:</h3>
+                <p class="interview-slide-desc">Pilih teknologi dasar yang ingin digunakan untuk membangun proyek ini.</p>
+              </div>
+
+              <div class="stack-radio-grid" id="interview-stack-selector" style="grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px;">
+                <label class="stack-card-radio selected" data-mode="html-prototype">
+                  <input type="radio" name="interview-stack" value="html-prototype" checked>
+                  <div class="stack-card-content">
+                    <div class="stack-card-name" style="font-size: 0.84rem;">🎨 HTML Prototype First</div>
+                    <div class="stack-card-desc" style="font-size: 0.73rem;">HTML5 + Tailwind CDN + jQuery (Langsung buka di browser).</div>
+                  </div>
+                </label>
+                <label class="stack-card-radio" data-mode="nextjs-fullstack">
+                  <input type="radio" name="interview-stack" value="nextjs-fullstack">
+                  <div class="stack-card-content">
+                    <div class="stack-card-name" style="font-size: 0.84rem;">⚡ Next.js 14 Fullstack</div>
+                    <div class="stack-card-desc" style="font-size: 0.73rem;">App Router, TypeScript, Tailwind, UI stubs, Prisma ORM.</div>
+                  </div>
+                </label>
+                <label class="stack-card-radio" data-mode="laravel-monolith">
+                  <input type="radio" name="interview-stack" value="laravel-monolith">
+                  <div class="stack-card-content">
+                    <div class="stack-card-name" style="font-size: 0.84rem;">🐘 Laravel Monolith (PHP)</div>
+                    <div class="stack-card-desc" style="font-size: 0.73rem;">Laravel 11 MVC, Blade Templates, Tailwind/jQuery, Eloquent.</div>
+                  </div>
+                </label>
+                <label class="stack-card-radio" data-mode="decoupled-api">
+                  <input type="radio" name="interview-stack" value="decoupled-api">
+                  <div class="stack-card-content">
+                    <div class="stack-card-name" style="font-size: 0.84rem;">🔌 Decoupled (React + Go/FastAPI)</div>
+                    <div class="stack-card-desc" style="font-size: 0.73rem;">Frontend React Vite + Backend REST API Golang / FastAPI.</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Dynamic AI Questions Slides (Injected dynamically per step) -->
+            <div id="interview-dynamic-slides"></div>
+
+            <!-- Final Slide: Custom Notes & Overview -->
+            <div class="interview-slide" id="interview-slide-final" data-step="final" style="display: none;">
+              <div class="interview-slide-header">
+                <span class="interview-badge" style="background: rgba(16,185,129,0.15); color: #34d399;">Langkah Terakhir • Catatan Tambahan</span>
+                <h3 class="interview-slide-title">Ada permintaan atau fitur khusus lain?</h3>
+                <p class="interview-slide-desc">Tuliskan instruksi tambahan di bawah (opsional) sebelum PRD dibuat.</p>
+              </div>
+
+              <div class="stack-input-field" style="margin-top: 14px;">
+                <label class="stack-field-label">✍️ Catatan / Preferensi Tambahan</label>
+                <textarea class="input-text" id="interview-custom-notes" rows="4" placeholder="Contoh: Butuh fitur cetak label barcode resep obat, atau integrasi notifikasi WA otomatis H-3 giliran antrean..." style="width: 100%; padding: 12px; background: #090d16; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; font-size: 0.85rem; resize: none;"></textarea>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <div class="modal-footer" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 20px;">
+          <button class="header-action-btn" id="btn-skip-interview" title="Langsung buat PRD menggunakan asumsi default AI">
+            <span>⏩ Lewati Semua</span>
+          </button>
+          
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <button class="header-action-btn" id="btn-prev-interview" style="display: none;">
+              <span>⬅️ Kembali</span>
+            </button>
+            <button class="btn-primary-cta" id="btn-next-interview" style="padding: 9px 20px; font-weight: 600;">
+              <span>Lanjut ➡️</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         Modal 2.5: Tech Stack & Architecture Selection Wizard
+         ==================================================================== -->
+    <div class="modal-backdrop" id="modal-stack-configurator">
+      <div class="modal-dialog large" style="max-width: 680px;">
+        <div class="modal-header">
+          <div class="modal-title">
+            <span>⚙️</span> Konfigurasi Tech Stack & Arsitektur
+          </div>
+          <button class="modal-close-btn modal-close-trigger">✕</button>
+        </div>
+        <div class="modal-body" style="display: flex; flex-direction: column; gap: 16px;">
+          <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">
+            Pilih pola arsitektur dan teknologi yang ingin digunakan OpenClaw untuk membuat project ini di workspace.
+          </p>
+
+          <!-- Step 1: Development Approach -->
+          <div class="stack-option-group">
+            <label class="stack-group-title">🎯 1. Target & Pendekatan Pengembangan</label>
+            <div class="stack-radio-grid" id="stack-mode-selector">
+              <label class="stack-card-radio selected" data-mode="html-prototype">
+                <input type="radio" name="dev-mode" value="html-prototype" checked>
+                <div class="stack-card-content">
+                  <div class="stack-card-icon">🎨</div>
+                  <div class="stack-card-name">HTML Prototype First</div>
+                  <div class="stack-card-desc">Slicing UI murni HTML5 + Tailwind + jQuery. Cepat & langsung jalan di browser tanpa build tools.</div>
+                </div>
+              </label>
+
+              <label class="stack-card-radio" data-mode="nextjs-fullstack">
+                <input type="radio" name="dev-mode" value="nextjs-fullstack">
+                <div class="stack-card-content">
+                  <div class="stack-card-icon">⚡</div>
+                  <div class="stack-card-name">Next.js 14 Fullstack</div>
+                  <div class="stack-card-desc">App Router, TypeScript, Tailwind, shadcn/ui stubs & Server Actions.</div>
+                </div>
+              </label>
+
+              <label class="stack-card-radio" data-mode="laravel-monolith">
+                <input type="radio" name="dev-mode" value="laravel-monolith">
+                <div class="stack-card-content">
+                  <div class="stack-card-icon">🐘</div>
+                  <div class="stack-card-name">Laravel Monolith (PHP)</div>
+                  <div class="stack-card-desc">Laravel 11 MVC, Blade Views, Tailwind/jQuery, Eloquent ORM.</div>
+                </div>
+              </label>
+
+              <label class="stack-card-radio" data-mode="decoupled-api">
+                <input type="radio" name="dev-mode" value="decoupled-api">
+                <div class="stack-card-content">
+                  <div class="stack-card-icon">🔌</div>
+                  <div class="stack-card-name">Decoupled (FE + API)</div>
+                  <div class="stack-card-desc">Frontend terpisah (React/Vue/HTML) + Backend API (Golang / FastAPI / Express).</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Dynamic Options based on Approach -->
+          <div class="stack-dropdowns-row" id="stack-dropdowns-row">
+            <!-- Frontend Selector -->
+            <div class="stack-input-field" id="field-frontend-stack">
+              <label class="stack-field-label">🎨 Frontend Framework</label>
+              <select class="filter-select stack-select" id="select-frontend-stack">
+                <option value="html-jquery" selected>HTML5 + Tailwind CSS (CDN) + jQuery</option>
+                <option value="react-vite">React (Vite) + Tailwind CSS</option>
+                <option value="nextjs">Next.js 14 (App Router)</option>
+                <option value="vue-vite">Vue 3 (Vite) + Tailwind</option>
+                <option value="laravel-blade">Laravel Blade + Alpine.js / jQuery</option>
+              </select>
+            </div>
+
+            <!-- Backend Selector -->
+            <div class="stack-input-field" id="field-backend-stack">
+              <label class="stack-field-label">🗄️ Backend Engine</label>
+              <select class="filter-select stack-select" id="select-backend-stack">
+                <option value="none" selected>Tidak Ada (Static UI / Mock data)</option>
+                <option value="nextjs-actions">Next.js Server Actions / API Routes</option>
+                <option value="go-fiber">Golang (Fiber / Gin REST API)</option>
+                <option value="fastapi">Python (FastAPI + Pydantic)</option>
+                <option value="laravel">PHP (Laravel 11 REST API)</option>
+                <option value="express">Node.js (Express.js REST API)</option>
+              </select>
+            </div>
+
+            <!-- Database Selector -->
+            <div class="stack-input-field" id="field-database-stack">
+              <label class="stack-field-label">💾 Database & Storage</label>
+              <select class="filter-select stack-select" id="select-database-stack">
+                <option value="sqlite" selected>SQLite (Zero-config file-based)</option>
+                <option value="postgresql">PostgreSQL</option>
+                <option value="mysql">MySQL / MariaDB</option>
+                <option value="localstorage">Browser LocalStorage (No DB)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Folder Structure Preview -->
+          <div class="stack-preview-box">
+            <div class="stack-preview-header">
+              <span>📁 Struktur Workspace yang Akan Dihasilkan:</span>
+            </div>
+            <pre class="stack-preview-code" id="stack-folder-preview">workspace/project-slug/
+├── index.html
+├── pages/
+│   ├── dashboard.html
+│   └── checkout.html
+├── css/style.css (Tailwind CDN)
+└── js/app.js (jQuery)</pre>
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; align-items: center; justify-content: space-between;">
+          <button class="header-action-btn modal-close-trigger">Batal</button>
+          <button class="btn-primary-cta" id="btn-confirm-stack-execution" style="padding: 10px 20px; font-weight: 600;">
+            <span>🚀 Konfirmasi & Mulai Eksekusi</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         Modal 3: OpenClaw Live Terminal Monitor Modal
+         ==================================================================== -->
+    <div class="modal-backdrop" id="modal-openclaw-monitor">
+      <div class="modal-dialog large">
+        <div class="modal-header">
+          <div class="modal-title">
+            <span>⚡</span> OpenClaw Autonomous Agent Monitor
+          </div>
+          <button class="modal-close-btn modal-close-trigger">✕</button>
+        </div>
+        <div class="modal-body">
+          <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; color: var(--text-secondary);">
+            <div>Status: <strong style="color: #34d399;" id="monitor-agent-status">Menunggu Perintah</strong></div>
+            <div>Workspace: <code style="color: #93c5fd; font-size: 0.75rem;">E:/projek-ai/openclaw/workspace</code></div>
+          </div>
+
+          <!-- Live Terminal Output -->
+          <div class="terminal-live-window" id="terminal-live-output">
+            <div class="terminal-log-line info">[System] OpenClaw Agent Terminal initialized. Ready for execution.</div>
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 0.78rem; color: var(--text-muted);">Model:</span>
+            <select class="filter-select" id="select-agent-model" style="padding: 4px 10px; font-size: 0.78rem; background: #0f172a; border: 1px solid #334155; color: #fff; border-radius: 6px;">
+              <option value="coding-fullstack" selected>⚡ coding-fullstack (9Router Combo)</option>
+              <option value="coding-execution">🚀 coding-execution (9Router Combo)</option>
+              <option value="coding-backend">🗄️ coding-backend (9Router Combo)</option>
+              <option value="coding-front-end">🎨 coding-front-end (9Router Combo)</option>
+              <option value="coding-databasedesign">💾 coding-databasedesign (9Router Combo)</option>
+              <option value="coding">💻 coding (9Router Combo)</option>
+              <option value="gemini-3.7-flash">🧠 Gemini 3.7 Flash</option>
+            </select>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="header-action-btn" id="btn-agent-pause">⏸️ Jeda</button>
+            <button class="btn-simulate-ai" id="btn-agent-start">▶️ Mulai Eksekusi</button>
+            <button class="header-action-btn modal-close-trigger">Tutup</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         Modal 4: Formal SOW & Quotation Document Modal
+         ==================================================================== -->
+    <div class="modal-backdrop" id="modal-sow-document">
+      <div class="modal-dialog large" style="max-width: 880px; max-height: 90vh;">
+        <div class="modal-header">
+          <div class="modal-title">
+            <span>📑</span> Dokumen Penawaran & Scope of Work (SOW)
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn-primary-cta" id="btn-download-modal-pdf" style="padding: 6px 12px; font-size: 0.82rem;">
+              <span>📥 Download PDF</span>
+            </button>
+            <button class="header-action-btn" id="btn-print-formal-sow">
+              <span>🖨️ Cetak</span>
+            </button>
+            <button class="modal-close-btn modal-close-trigger">✕</button>
+          </div>
+        </div>
+        <div class="modal-body" style="background: #090d16; padding: 24px; overflow-y: auto;">
+          <div class="formal-doc-sheet" id="formal-doc-sheet">
+            <!-- Rendered dynamically by JS -->
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; align-items: center; justify-content: space-between;">
+          <button class="header-action-btn modal-close-trigger">Tutup</button>
+          <button class="btn-primary-cta" id="btn-copy-sow-markdown">
+            <span>📋 Salin Format Markdown</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
