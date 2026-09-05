@@ -1,0 +1,17 @@
+# env
+.env
+server/.env
+
+# deps
+node_modules/
+server/node_modules/
+
+# generated workspaces
+workspace/
+server/workspace/
+E:/projek-ai/openclaw/workspace/
+
+# tooling
+.omo/
+.DS_Store
+Thumbs.db

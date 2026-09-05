@@ -989,7 +989,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   dom.btnAgentStart?.addEventListener('click', async () => {
-    const selectedModel = document.getElementById('select-agent-model')?.value || 'coding-fullstack';
+    const selectedModel = document.getElementById('select-agent-model')?.value || 'cx/gpt-5.4-mini';
     try {
       await fetch(`${OPENCLAW_API_URL}/api/tasks/run`, {
         method: 'POST',
@@ -2290,7 +2290,7 @@ Instruction for AI Agent:
           })
         });
 
-        const selectedModel = document.getElementById('select-agent-model')?.value || 'coding-fullstack';
+        const selectedModel = document.getElementById('select-agent-model')?.value || 'cx/gpt-5.4-mini';
         const resRun = await fetch(`${OPENCLAW_API_URL}/api/tasks/run`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

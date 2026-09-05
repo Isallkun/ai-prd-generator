@@ -3,35 +3,40 @@
  * Real Cloud AI Generator (Gemini, Anthropic, OpenRouter, OpenAI) with Smart Fallback & OpenClaw Workspace Dispatcher
  */
 
-const http = require('http');
-const https = require('https');
-const fs = require('fs');
-const path = require('path');
-const url = require('url');
+const http = require("http");
+const https = require("https");
+const fs = require("fs");
+const path = require("path");
+const url = require("url");
 
 const PORT = process.env.PORT || 4000;
-const OPENCLAW_WORKSPACE_DIR = process.env.OPENCLAW_WORKSPACE || 'E:/projek-ai/openclaw/workspace';
-const LOCAL_WORKSPACE_DIR = path.join(__dirname, 'workspace');
+const OPENCLAW_WORKSPACE_DIR = process.env.OPENCLAW_WORKSPACE || "D:/labs/ai-prd-generator/workspace";
+const LOCAL_WORKSPACE_DIR = path.join(__dirname, "workspace");
+
+const DEFAULT_PRD_MODEL = "cx/gpt-5.6-terra";
+const DEFAULT_TASK_MODEL = "cx/gpt-5.4-mini";
+const DEFAULT_NINEROUTER_TIMEOUT_MS = 240000;
+
+function getNineRouterTimeoutMs() {
+  const raw = Number(process.env.NINEROUTER_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_NINEROUTER_TIMEOUT_MS;
+}
 
 // Load Environment Variables (.env from local and E:\projek-ai\.env)
 function loadEnv() {
-  const envPaths = [
-    path.join(__dirname, '.env'),
-    'E:/projek-ai/.env',
-    'E:/projek-ai/openclaw/.env'
-  ];
+  const envPaths = [path.join(__dirname, ".env"), "E:/projek-ai/.env", "E:/projek-ai/openclaw/.env"];
 
   envPaths.forEach((envPath) => {
     if (fs.existsSync(envPath)) {
-      const content = fs.readFileSync(envPath, 'utf-8');
-      content.split('\n').forEach((line) => {
+      const content = fs.readFileSync(envPath, "utf-8");
+      content.split("\n").forEach((line) => {
         const trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith('#')) {
+        if (trimmed && !trimmed.startsWith("#")) {
           const match = trimmed.match(/^([A-Za-z0-9_]+)=(.*)$/);
           if (match) {
             const key = match[1].trim();
-            const val = match[2].trim().replace(/^["']|["']$/g, '');
-            if (!process.env[key] && val && !val.includes('YOUR_')) {
+            const val = match[2].trim().replace(/^["']|["']$/g, "");
+            if (!process.env[key] && val && !val.includes("YOUR_")) {
               process.env[key] = val;
             }
           }
@@ -54,7 +59,7 @@ const state = {
   activeTaskModel: null,
   // [C] Context tracking: files and deps created during run
   createdFiles: [],
-  discoveredDependencies: {}
+  discoveredDependencies: {},
 };
 
 // Ensure workspace directory exists
@@ -83,29 +88,31 @@ function broadcastEvent(type, data) {
   });
 }
 
-function broadcastLog(message, level = 'info') {
-  broadcastEvent('log', { message, level });
+function broadcastLog(message, level = "info") {
+  broadcastEvent("log", { message, level });
   console.log(`[OpenClaw Agent] ${message}`);
 }
 
 function setCorsHeaders(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
       try {
         resolve(body ? JSON.parse(body) : {});
       } catch (err) {
         reject(err);
       }
     });
-    req.on('error', reject);
+    req.on("error", reject);
   });
 }
 
@@ -122,7 +129,7 @@ function writeFoundationFile(projectDir, relativePath, content) {
   const fullPath = path.join(projectDir, relativePath);
   ensureDir(path.dirname(fullPath));
   if (!fs.existsSync(fullPath)) {
-    fs.writeFileSync(fullPath, content, 'utf-8');
+    fs.writeFileSync(fullPath, content, "utf-8");
   }
 }
 
@@ -130,8 +137,11 @@ function writeFoundationFile(projectDir, relativePath, content) {
 // [A] PRE-SCAN: Ask AI for complete dependency list from all tasks
 // ============================================================================
 async function preScanDependencies(project, tasks, ninerouterBase, ninerouterKey, ninerouterModel) {
-  const techStackStr = project.techStack ? project.techStack.map(t => `${t.name}: ${t.value}`).join(', ') : 'Next.js 14, Tailwind CSS, PostgreSQL, Prisma';
-  const taskList = tasks.slice(0, 44).map(t => `- [${t.id}] ${t.title}`).join('\n');
+  const techStackStr = project.techStack ? project.techStack.map((t) => `${t.name}: ${t.value}`).join(", ") : "Next.js 14, Tailwind CSS, PostgreSQL, Prisma";
+  const taskList = tasks
+    .slice(0, 44)
+    .map((t) => `- [${t.id}] ${t.title}`)
+    .join("\n");
 
   const systemPrompt = `You are a senior software architect. Given a list of development tasks, return ALL npm packages needed.
 Return ONLY valid JSON:
@@ -155,20 +165,35 @@ Return ONLY valid JSON:
   // Safe fallback — comprehensive Next.js fullstack deps
   return {
     dependencies: {
-      "next": "^14.2.35", "react": "^18.3.1", "react-dom": "^18.3.1",
-      "lucide-react": "^0.451.0", "clsx": "^2.1.1", "tailwind-merge": "^2.5.4",
-      "next-auth": "^4.24.7", "@auth/prisma-adapter": "^2.7.2",
-      "@prisma/client": "^5.18.0", "bcryptjs": "^2.4.3",
-      "zod": "^3.23.8", "react-hook-form": "^7.53.0", "@hookform/resolvers": "^3.9.0",
-      "date-fns": "^3.6.0", "pusher": "^5.2.0", "pusher-js": "^8.4.0",
-      "axios": "^1.7.7"
+      next: "^14.2.35",
+      react: "^18.3.1",
+      "react-dom": "^18.3.1",
+      "lucide-react": "^0.451.0",
+      clsx: "^2.1.1",
+      "tailwind-merge": "^2.5.4",
+      "next-auth": "^4.24.7",
+      "@auth/prisma-adapter": "^2.7.2",
+      "@prisma/client": "^5.18.0",
+      bcryptjs: "^2.4.3",
+      zod: "^3.23.8",
+      "react-hook-form": "^7.53.0",
+      "@hookform/resolvers": "^3.9.0",
+      "date-fns": "^3.6.0",
+      pusher: "^5.2.0",
+      "pusher-js": "^8.4.0",
+      axios: "^1.7.7",
     },
     devDependencies: {
-      "tailwindcss": "^3.4.14", "postcss": "^8.4.47", "autoprefixer": "^10.4.20",
-      "typescript": "^5.6.3", "@types/node": "^22.7.5",
-      "@types/react": "^18.3.11", "@types/react-dom": "^18.3.1",
-      "@types/bcryptjs": "^2.4.6", "prisma": "^5.18.0"
-    }
+      tailwindcss: "^3.4.14",
+      postcss: "^8.4.47",
+      autoprefixer: "^10.4.20",
+      typescript: "^5.6.3",
+      "@types/node": "^22.7.5",
+      "@types/react": "^18.3.11",
+      "@types/react-dom": "^18.3.1",
+      "@types/bcryptjs": "^2.4.6",
+      prisma: "^5.18.0",
+    },
   };
 }
 
@@ -176,16 +201,16 @@ Return ONLY valid JSON:
 // [B] MULTI-ARCHETYPE FOUNDATION SCAFFOLDING (HTML, Laravel, Decoupled, Next.js)
 // ============================================================================
 function scaffoldProjectFoundation(project, projectDir, scanResult) {
-  const config = project.techStackConfig || state.activeTechStackConfig || { mode: 'html-prototype', frontend: 'html-jquery', backend: 'none', database: 'localstorage' };
-  const mode = config.mode || 'html-prototype';
+  const config = project.techStackConfig || state.activeTechStackConfig || { mode: "html-prototype", frontend: "html-jquery", backend: "none", database: "localstorage" };
+  const mode = config.mode || "html-prototype";
 
   broadcastLog(`🏗️ [Foundation] Membangun fondasi arsitektur: [${mode.toUpperCase()}]...`);
 
-  if (mode === 'html-prototype') {
+  if (mode === "html-prototype") {
     scaffoldHtmlPrototype(project, projectDir);
-  } else if (mode === 'laravel-monolith') {
+  } else if (mode === "laravel-monolith") {
     scaffoldLaravelMonolith(project, projectDir);
-  } else if (mode === 'decoupled-api') {
+  } else if (mode === "decoupled-api") {
     scaffoldDecoupledApi(project, projectDir, config);
   } else {
     // Default: Next.js 14 Fullstack
@@ -195,12 +220,15 @@ function scaffoldProjectFoundation(project, projectDir, scanResult) {
 
 // 1. HTML Prototype First Scaffolder (Pure HTML + Tailwind CDN + jQuery)
 function scaffoldHtmlPrototype(project, projectDir) {
-  ensureDir(path.join(projectDir, 'css'));
-  ensureDir(path.join(projectDir, 'js'));
-  ensureDir(path.join(projectDir, 'pages'));
+  ensureDir(path.join(projectDir, "css"));
+  ensureDir(path.join(projectDir, "js"));
+  ensureDir(path.join(projectDir, "pages"));
 
   // index.html
-  writeFoundationFile(projectDir, 'index.html', `<!DOCTYPE html>
+  writeFoundationFile(
+    projectDir,
+    "index.html",
+    `<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
@@ -233,7 +261,7 @@ function scaffoldHtmlPrototype(project, projectDir) {
     <div class="text-center max-w-3xl mx-auto mb-16">
       <div class="inline-block px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-semibold uppercase tracking-wider mb-4">Interactive HTML Prototype</div>
       <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight text-white mb-6">${project.title}</h1>
-      <p class="text-lg text-slate-400 leading-relaxed mb-8">${project.problemStatement || project.tagline || 'Modern Web Prototype'}</p>
+      <p class="text-lg text-slate-400 leading-relaxed mb-8">${project.problemStatement || project.tagline || "Modern Web Prototype"}</p>
       <div class="flex justify-center gap-4">
         <a href="pages/dashboard.html" class="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-semibold text-white transition shadow-lg shadow-emerald-900/30">Buka Dashboard</a>
         <a href="pages/auth.html" class="px-6 py-3 rounded-xl border border-slate-700 bg-slate-900/80 hover:bg-slate-800 font-semibold text-slate-200 transition">Halaman Login</a>
@@ -244,42 +272,64 @@ function scaffoldHtmlPrototype(project, projectDir) {
   <script src="js/app.js"></script>
   <script>lucide.createIcons();</script>
 </body>
-</html>`);
+</html>`,
+  );
 
   // css/style.css
-  writeFoundationFile(projectDir, 'css/style.css', `/* Custom styles for ${project.title} prototype */
+  writeFoundationFile(
+    projectDir,
+    "css/style.css",
+    `/* Custom styles for ${project.title} prototype */
 :root {
   --bg-primary: #090d16;
   --text-primary: #f8fafc;
 }
 body { background: var(--bg-primary); }
-.glass-panel { background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }`);
+.glass-panel { background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }`,
+  );
 
   // js/app.js
-  writeFoundationFile(projectDir, 'js/app.js', `// Interactive Client Mock Logic for ${project.title}
+  writeFoundationFile(
+    projectDir,
+    "js/app.js",
+    `// Interactive Client Mock Logic for ${project.title}
 $(document).ready(function() {
   console.log('${project.title} Prototype Loaded');
   if (window.lucide) lucide.createIcons();
-});`);
+});`,
+  );
 
-  state.createdFiles = ['index.html', 'css/style.css', 'js/app.js'];
-  broadcastLog(`✅ [Foundation] HTML5 Prototype Starter siap (index.html, css/style.css, js/app.js)`, 'success');
+  state.createdFiles = ["index.html", "css/style.css", "js/app.js"];
+  broadcastLog(`✅ [Foundation] HTML5 Prototype Starter siap (index.html, css/style.css, js/app.js)`, "success");
 }
 
 // 2. Laravel Monolith Scaffolder
 function scaffoldLaravelMonolith(project, projectDir) {
-  ensureDir(path.join(projectDir, 'app/Http/Controllers'));
-  ensureDir(path.join(projectDir, 'app/Models'));
-  ensureDir(path.join(projectDir, 'resources/views/layouts'));
-  ensureDir(path.join(projectDir, 'routes'));
-  ensureDir(path.join(projectDir, 'database/migrations'));
+  ensureDir(path.join(projectDir, "app/Http/Controllers"));
+  ensureDir(path.join(projectDir, "app/Models"));
+  ensureDir(path.join(projectDir, "resources/views/layouts"));
+  ensureDir(path.join(projectDir, "routes"));
+  ensureDir(path.join(projectDir, "database/migrations"));
 
-  writeFoundationFile(projectDir, 'composer.json', JSON.stringify({
-    name: `openclaw/${project.id}`, type: "project", description: project.tagline || project.title,
-    require: { "php": "^8.2", "laravel/framework": "^11.0" }
-  }, null, 2));
+  writeFoundationFile(
+    projectDir,
+    "composer.json",
+    JSON.stringify(
+      {
+        name: `openclaw/${project.id}`,
+        type: "project",
+        description: project.tagline || project.title,
+        require: { php: "^8.2", "laravel/framework": "^11.0" },
+      },
+      null,
+      2,
+    ),
+  );
 
-  writeFoundationFile(projectDir, 'routes/web.php', `<?php
+  writeFoundationFile(
+    projectDir,
+    "routes/web.php",
+    `<?php
 use Illuminate\\Support\\Facades\\Route;
 
 Route::get('/', function () {
@@ -287,9 +337,13 @@ Route::get('/', function () {
 });
 Route::get('/dashboard', function () {
     return view('dashboard');
-})->name('dashboard');`);
+})->name('dashboard');`,
+  );
 
-  writeFoundationFile(projectDir, 'resources/views/layouts/app.blade.php', `<!DOCTYPE html>
+  writeFoundationFile(
+    projectDir,
+    "resources/views/layouts/app.blade.php",
+    `<!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
@@ -300,30 +354,45 @@ Route::get('/dashboard', function () {
 <body class="bg-slate-950 text-slate-100 min-h-screen">
     @yield('content')
 </body>
-</html>`);
+</html>`,
+  );
 
-  state.createdFiles = ['composer.json', 'routes/web.php', 'resources/views/layouts/app.blade.php'];
-  broadcastLog(`✅ [Foundation] Laravel 11 Monolith Structure siap`, 'success');
+  state.createdFiles = ["composer.json", "routes/web.php", "resources/views/layouts/app.blade.php"];
+  broadcastLog(`✅ [Foundation] Laravel 11 Monolith Structure siap`, "success");
 }
 
 // 3. Decoupled API Scaffolder (React / Vue + Go / Python)
 function scaffoldDecoupledApi(project, projectDir, config) {
-  const backend = config.backend || 'go-fiber';
-  ensureDir(path.join(projectDir, 'frontend/src'));
-  ensureDir(path.join(projectDir, 'backend'));
+  const backend = config.backend || "go-fiber";
+  ensureDir(path.join(projectDir, "frontend/src"));
+  ensureDir(path.join(projectDir, "backend"));
 
   // Frontend package.json
-  writeFoundationFile(projectDir, 'frontend/package.json', JSON.stringify({
-    name: `${project.id}-frontend`, private: true, version: "0.0.0", type: "module",
-    scripts: { dev: "vite", build: "vite build" },
-    dependencies: { "react": "^18.3.1", "react-dom": "^18.3.1", "lucide-react": "^0.451.0", "axios": "^1.7.7" },
-    devDependencies: { "@types/react": "^18.3.11", "@vitejs/plugin-react": "^4.3.3", "vite": "^5.4.9", "tailwindcss": "^3.4.14", "autoprefixer": "^10.4.20" }
-  }, null, 2));
+  writeFoundationFile(
+    projectDir,
+    "frontend/package.json",
+    JSON.stringify(
+      {
+        name: `${project.id}-frontend`,
+        private: true,
+        version: "0.0.0",
+        type: "module",
+        scripts: { dev: "vite", build: "vite build" },
+        dependencies: { react: "^18.3.1", "react-dom": "^18.3.1", "lucide-react": "^0.451.0", axios: "^1.7.7" },
+        devDependencies: { "@types/react": "^18.3.11", "@vitejs/plugin-react": "^4.3.3", vite: "^5.4.9", tailwindcss: "^3.4.14", autoprefixer: "^10.4.20" },
+      },
+      null,
+      2,
+    ),
+  );
 
   // Backend starter
-  if (backend === 'go-fiber') {
-    writeFoundationFile(projectDir, 'backend/go.mod', `module ${project.id}-api\n\ngo 1.22\n\nrequire github.com/gofiber/fiber/v2 v2.52.5\n`);
-    writeFoundationFile(projectDir, 'backend/main.go', `package main
+  if (backend === "go-fiber") {
+    writeFoundationFile(projectDir, "backend/go.mod", `module ${project.id}-api\n\ngo 1.22\n\nrequire github.com/gofiber/fiber/v2 v2.52.5\n`);
+    writeFoundationFile(
+      projectDir,
+      "backend/main.go",
+      `package main
 
 import (
 	"log"
@@ -340,10 +409,14 @@ func main() {
 	})
 
 	log.Fatal(app.Listen(":8080"))
-}`);
-  } else if (backend === 'fastapi') {
-    writeFoundationFile(projectDir, 'backend/requirements.txt', `fastapi>=0.115.0\nuvicorn>=0.31.0\npydantic>=2.9.2\n`);
-    writeFoundationFile(projectDir, 'backend/main.py', `from fastapi import FastAPI
+}`,
+    );
+  } else if (backend === "fastapi") {
+    writeFoundationFile(projectDir, "backend/requirements.txt", `fastapi>=0.115.0\nuvicorn>=0.31.0\npydantic>=2.9.2\n`);
+    writeFoundationFile(
+      projectDir,
+      "backend/main.py",
+      `from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="${project.title} API")
@@ -352,85 +425,123 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "project": "${project.title}"}
-`);
+`,
+    );
   }
 
-  state.createdFiles = ['frontend/package.json', backend === 'go-fiber' ? 'backend/main.go' : 'backend/main.py'];
-  broadcastLog(`✅ [Foundation] Decoupled (Frontend + ${backend}) starter siap`, 'success');
+  state.createdFiles = ["frontend/package.json", backend === "go-fiber" ? "backend/main.go" : "backend/main.py"];
+  broadcastLog(`✅ [Foundation] Decoupled (Frontend + ${backend}) starter siap`, "success");
 }
 
 // 4. Next.js Fullstack Scaffolder (Original robust setup)
 function scaffoldNextJsFullstack(project, projectDir, scanResult) {
   // 1. tsconfig.json
-  writeFoundationFile(projectDir, 'tsconfig.json', JSON.stringify({
-    compilerOptions: {
-      lib: ["dom", "dom.iterable", "esnext"], allowJs: true, skipLibCheck: true,
-      strict: false, noEmit: true, esModuleInterop: true, module: "esnext",
-      moduleResolution: "bundler", resolveJsonModule: true, isolatedModules: true,
-      jsx: "preserve", incremental: true, plugins: [{ name: "next" }],
-      paths: { "@/*": ["./src/*"] }
-    },
-    include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-    exclude: ["node_modules"]
-  }, null, 2));
+  writeFoundationFile(
+    projectDir,
+    "tsconfig.json",
+    JSON.stringify(
+      {
+        compilerOptions: {
+          lib: ["dom", "dom.iterable", "esnext"],
+          allowJs: true,
+          skipLibCheck: true,
+          strict: false,
+          noEmit: true,
+          esModuleInterop: true,
+          module: "esnext",
+          moduleResolution: "bundler",
+          resolveJsonModule: true,
+          isolatedModules: true,
+          jsx: "preserve",
+          incremental: true,
+          plugins: [{ name: "next" }],
+          paths: { "@/*": ["./src/*"] },
+        },
+        include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+        exclude: ["node_modules"],
+      },
+      null,
+      2,
+    ),
+  );
 
   // 2. tailwind.config.js
-  writeFoundationFile(projectDir, 'tailwind.config.js',
-`/** @type {import('tailwindcss').Config} */
+  writeFoundationFile(
+    projectDir,
+    "tailwind.config.js",
+    `/** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
   theme: { extend: {} },
   plugins: [],
-};`);
+};`,
+  );
 
   // 3. postcss.config.js
-  writeFoundationFile(projectDir, 'postcss.config.js', `module.exports = { plugins: { tailwindcss: {}, autoprefixer: {} } };`);
+  writeFoundationFile(projectDir, "postcss.config.js", `module.exports = { plugins: { tailwindcss: {}, autoprefixer: {} } };`);
 
   // 4. next.config.js
-  writeFoundationFile(projectDir, 'next.config.js',
-`/** @type {import('next').NextConfig} */
+  writeFoundationFile(
+    projectDir,
+    "next.config.js",
+    `/** @type {import('next').NextConfig} */
 const nextConfig = {};
-module.exports = nextConfig;`);
+module.exports = nextConfig;`,
+  );
 
   // 5. globals.css
-  ensureDir(path.join(projectDir, 'src/app'));
-  writeFoundationFile(projectDir, 'src/app/globals.css',
-`@tailwind base;
+  ensureDir(path.join(projectDir, "src/app"));
+  writeFoundationFile(
+    projectDir,
+    "src/app/globals.css",
+    `@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root { --background: #090d16; --foreground: #f8fafc; }
-body { color: var(--foreground); background: var(--background); font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }`);
+body { color: var(--foreground); background: var(--background); font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }`,
+  );
 
   // 6. layout.tsx
-  writeFoundationFile(projectDir, 'src/app/layout.tsx',
-`import type { Metadata } from 'next';
+  writeFoundationFile(
+    projectDir,
+    "src/app/layout.tsx",
+    `import type { Metadata } from 'next';
 import './globals.css';
-export const metadata: Metadata = { title: '${project.title}', description: '${(project.tagline || '').replace(/'/g, '')}' };
+export const metadata: Metadata = { title: '${project.title}', description: '${(project.tagline || "").replace(/'/g, "")}' };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (<html lang="id"><body className="min-h-screen bg-slate-950 text-slate-100 antialiased">{children}</body></html>);
-}`);
+}`,
+  );
 
   // 7. src/lib/utils.ts
-  ensureDir(path.join(projectDir, 'src/lib'));
-  writeFoundationFile(projectDir, 'src/lib/utils.ts',
-`import { type ClassValue, clsx } from 'clsx';
+  ensureDir(path.join(projectDir, "src/lib"));
+  writeFoundationFile(
+    projectDir,
+    "src/lib/utils.ts",
+    `import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 export function formatDate(date: Date | string): string { return new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }); }
-export function formatCurrency(amount: number): string { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(amount); }`);
+export function formatCurrency(amount: number): string { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(amount); }`,
+  );
 
   // 8. src/lib/prisma.ts
-  writeFoundationFile(projectDir, 'src/lib/prisma.ts',
-`import { PrismaClient } from '@prisma/client';
+  writeFoundationFile(
+    projectDir,
+    "src/lib/prisma.ts",
+    `import { PrismaClient } from '@prisma/client';
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 export const prisma = globalForPrisma.prisma || new PrismaClient({ log: process.env.NODE_ENV === 'development' ? ['error'] : ['error'] });
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
-export default prisma;`);
+export default prisma;`,
+  );
 
   // 9. src/lib/auth.ts stub
-  writeFoundationFile(projectDir, 'src/lib/auth.ts',
-`import { NextAuthOptions } from 'next-auth';
+  writeFoundationFile(
+    projectDir,
+    "src/lib/auth.ts",
+    `import { NextAuthOptions } from 'next-auth';
 
 import CredentialsProvider from 'next-auth/providers/credentials';
 export const authOptions: NextAuthOptions = {
@@ -445,43 +556,61 @@ export const authOptions: NextAuthOptions = {
     }
   })],
   secret: process.env.NEXTAUTH_SECRET,
-};`);
+};`,
+  );
 
   // 10. UI Component Stubs
-  const uiDir = path.join(projectDir, 'src/components/ui');
+  const uiDir = path.join(projectDir, "src/components/ui");
   ensureDir(uiDir);
-  writeFoundationFile(projectDir, 'src/components/ui/button.tsx', uiStubs.button);
-  writeFoundationFile(projectDir, 'src/components/ui/card.tsx', uiStubs.card);
-  writeFoundationFile(projectDir, 'src/components/ui/badge.tsx', uiStubs.badge);
-  writeFoundationFile(projectDir, 'src/components/ui/input.tsx', uiStubs.input);
-  writeFoundationFile(projectDir, 'src/components/ui/label.tsx', uiStubs.label);
-  writeFoundationFile(projectDir, 'src/components/ui/textarea.tsx', uiStubs.textarea);
-  writeFoundationFile(projectDir, 'src/components/ui/select.tsx', uiStubs.select);
-  writeFoundationFile(projectDir, 'src/components/ui/checkbox.tsx', uiStubs.checkbox);
-  writeFoundationFile(projectDir, 'src/components/ui/dialog.tsx', uiStubs.dialog);
-  writeFoundationFile(projectDir, 'src/components/ui/tabs.tsx', uiStubs.tabs);
-  writeFoundationFile(projectDir, 'src/components/ui/table.tsx', uiStubs.table);
-  writeFoundationFile(projectDir, 'src/components/ui/separator.tsx', uiStubs.separator);
-  writeFoundationFile(projectDir, 'src/components/ui/skeleton.tsx', uiStubs.skeleton);
-  writeFoundationFile(projectDir, 'src/components/ui/avatar.tsx', uiStubs.avatar);
-  writeFoundationFile(projectDir, 'src/components/ui/use-toast.ts', uiStubs.useToast);
-  writeFoundationFile(projectDir, 'src/components/ui/toast.tsx', uiStubs.toast);
-  writeFoundationFile(projectDir, 'src/components/ui/progress.tsx', uiStubs.progress);
+  writeFoundationFile(projectDir, "src/components/ui/button.tsx", uiStubs.button);
+  writeFoundationFile(projectDir, "src/components/ui/card.tsx", uiStubs.card);
+  writeFoundationFile(projectDir, "src/components/ui/badge.tsx", uiStubs.badge);
+  writeFoundationFile(projectDir, "src/components/ui/input.tsx", uiStubs.input);
+  writeFoundationFile(projectDir, "src/components/ui/label.tsx", uiStubs.label);
+  writeFoundationFile(projectDir, "src/components/ui/textarea.tsx", uiStubs.textarea);
+  writeFoundationFile(projectDir, "src/components/ui/select.tsx", uiStubs.select);
+  writeFoundationFile(projectDir, "src/components/ui/checkbox.tsx", uiStubs.checkbox);
+  writeFoundationFile(projectDir, "src/components/ui/dialog.tsx", uiStubs.dialog);
+  writeFoundationFile(projectDir, "src/components/ui/tabs.tsx", uiStubs.tabs);
+  writeFoundationFile(projectDir, "src/components/ui/table.tsx", uiStubs.table);
+  writeFoundationFile(projectDir, "src/components/ui/separator.tsx", uiStubs.separator);
+  writeFoundationFile(projectDir, "src/components/ui/skeleton.tsx", uiStubs.skeleton);
+  writeFoundationFile(projectDir, "src/components/ui/avatar.tsx", uiStubs.avatar);
+  writeFoundationFile(projectDir, "src/components/ui/use-toast.ts", uiStubs.useToast);
+  writeFoundationFile(projectDir, "src/components/ui/toast.tsx", uiStubs.toast);
+  writeFoundationFile(projectDir, "src/components/ui/progress.tsx", uiStubs.progress);
 
   // Track created files for context injection
   state.createdFiles = [
-    'tsconfig.json', 'tailwind.config.js', 'postcss.config.js', 'next.config.js',
-    'src/app/globals.css', 'src/app/layout.tsx', 'src/lib/utils.ts',
-    'src/lib/prisma.ts', 'src/lib/auth.ts',
-    'src/components/ui/button.tsx', 'src/components/ui/card.tsx', 'src/components/ui/badge.tsx',
-    'src/components/ui/input.tsx', 'src/components/ui/label.tsx', 'src/components/ui/textarea.tsx',
-    'src/components/ui/select.tsx', 'src/components/ui/checkbox.tsx', 'src/components/ui/dialog.tsx',
-    'src/components/ui/tabs.tsx', 'src/components/ui/table.tsx', 'src/components/ui/separator.tsx',
-    'src/components/ui/skeleton.tsx', 'src/components/ui/avatar.tsx',
-    'src/components/ui/use-toast.ts', 'src/components/ui/toast.tsx', 'src/components/ui/progress.tsx'
+    "tsconfig.json",
+    "tailwind.config.js",
+    "postcss.config.js",
+    "next.config.js",
+    "src/app/globals.css",
+    "src/app/layout.tsx",
+    "src/lib/utils.ts",
+    "src/lib/prisma.ts",
+    "src/lib/auth.ts",
+    "src/components/ui/button.tsx",
+    "src/components/ui/card.tsx",
+    "src/components/ui/badge.tsx",
+    "src/components/ui/input.tsx",
+    "src/components/ui/label.tsx",
+    "src/components/ui/textarea.tsx",
+    "src/components/ui/select.tsx",
+    "src/components/ui/checkbox.tsx",
+    "src/components/ui/dialog.tsx",
+    "src/components/ui/tabs.tsx",
+    "src/components/ui/table.tsx",
+    "src/components/ui/separator.tsx",
+    "src/components/ui/skeleton.tsx",
+    "src/components/ui/avatar.tsx",
+    "src/components/ui/use-toast.ts",
+    "src/components/ui/toast.tsx",
+    "src/components/ui/progress.tsx",
   ];
 
-  broadcastLog(`✅ [Foundation] ${state.createdFiles.length} foundation files siap`, 'success');
+  broadcastLog(`✅ [Foundation] ${state.createdFiles.length} foundation files siap`, "success");
 }
 
 // ============================================================================
@@ -664,41 +793,45 @@ export function Toaster() {
 import { cn } from '@/lib/utils';
 export function Progress({ value = 0, className }: { value?: number; className?: string }) {
   return (<div className={cn('relative h-2 w-full overflow-hidden rounded-full bg-slate-800', className)}><div className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500 rounded-full" style={{ width: \`\${Math.min(100, Math.max(0, value))}%\` }} /></div>);
-}`
+}`,
 };
 
 // ============================================================================
 // [A] Write complete package.json from pre-scan result
 // ============================================================================
 function writeCompletePackageJson(projectDir, project, scanResult) {
-  const packageJsonPath = path.join(projectDir, 'package.json');
-  const baseDeps = { "next": "^14.2.35", "react": "^18.3.1", "react-dom": "^18.3.1", "lucide-react": "^0.451.0", "clsx": "^2.1.1", "tailwind-merge": "^2.5.4" };
-  const baseDevDeps = { "tailwindcss": "^3.4.14", "postcss": "^8.4.47", "autoprefixer": "^10.4.20", "typescript": "^5.6.3", "@types/node": "^22.7.5", "@types/react": "^18.3.11", "@types/react-dom": "^18.3.1" };
+  const packageJsonPath = path.join(projectDir, "package.json");
+  const baseDeps = { next: "^14.2.35", react: "^18.3.1", "react-dom": "^18.3.1", "lucide-react": "^0.451.0", clsx: "^2.1.1", "tailwind-merge": "^2.5.4" };
+  const baseDevDeps = { tailwindcss: "^3.4.14", postcss: "^8.4.47", autoprefixer: "^10.4.20", typescript: "^5.6.3", "@types/node": "^22.7.5", "@types/react": "^18.3.11", "@types/react-dom": "^18.3.1" };
   const mergedDeps = { ...baseDeps, ...(scanResult?.dependencies || {}) };
   const mergedDevDeps = { ...baseDevDeps, ...(scanResult?.devDependencies || {}) };
   const pkg = {
-    name: project.id, version: '1.0.0', description: project.tagline || project.title, private: true,
-    scripts: { dev: 'next dev', build: 'next build', start: 'next start', lint: 'next lint', 'db:generate': 'prisma generate', 'db:push': 'prisma db push' },
-    dependencies: mergedDeps, devDependencies: mergedDevDeps
+    name: project.id,
+    version: "1.0.0",
+    description: project.tagline || project.title,
+    private: true,
+    scripts: { dev: "next dev", build: "next build", start: "next start", lint: "next lint", "db:generate": "prisma generate", "db:push": "prisma db push" },
+    dependencies: mergedDeps,
+    devDependencies: mergedDevDeps,
   };
-  fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2), 'utf-8');
+  fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2), "utf-8");
   state.discoveredDependencies = mergedDeps;
-  broadcastLog(`📦 [Foundation] package.json ditulis dengan ${Object.keys(mergedDeps).length} dependencies`, 'success');
+  broadcastLog(`📦 [Foundation] package.json ditulis dengan ${Object.keys(mergedDeps).length} dependencies`, "success");
 }
 
 // ============================================================================
 // AI REQUIREMENT DEEP-DIVE INTERVIEW GENERATOR
 // ============================================================================
-async function generateClarificationQuestions(userIdea, language = 'id') {
+async function generateClarificationQuestions(userIdea, language = "id") {
   const geminiKey = process.env.GEMINI_API_KEY;
   const ninerouterBase = process.env.NINEROUTER_API_BASE;
-  const ninerouterKey = process.env.NINEROUTER_API_KEY || 'sk-9router';
-  const ninerouterModel = process.env.NINEROUTER_PRD_MODEL || 'coding-prd';
+  const ninerouterKey = process.env.NINEROUTER_API_KEY;
+  const ninerouterModel = process.env.NINEROUTER_PRD_MODEL || DEFAULT_PRD_MODEL;
 
   const systemPrompt = `You are a Principal Technical Product Consultant.
 Analyze the user's raw product idea and generate 3 to 4 critical, high-impact multiple-choice clarification questions to uncover specific operational needs (e.g. scale, key user flows, hardware/printer/display integrations, payment gateways, compliance, multi-tenancy, or notifications).
 
-Language: ${language === 'id' ? 'Bahasa Indonesia' : 'English'}.
+Language: ${language === "id" ? "Bahasa Indonesia" : "English"}.
 
 Return STRICTLY valid JSON with schema:
 {
@@ -726,17 +859,17 @@ Return ONLY JSON without markdown.`;
       const res = await callNineRouterApi(ninerouterBase, ninerouterKey, ninerouterModel, systemPrompt, userPrompt);
       if (res && res.questions && res.questions.length > 0) return res;
     } catch (e) {
-      console.warn('[Question Generator] 9Router failed:', e.message);
+      console.warn("[Question Generator] 9Router failed:", e.message);
     }
   }
 
   // 1. Try Gemini
-  if (geminiKey && !geminiKey.includes('YOUR_')) {
+  if (geminiKey && !geminiKey.includes("YOUR_")) {
     try {
-      const res = await callGeminiApi(geminiKey, 'gemini-2.5-flash', systemPrompt, userPrompt);
+      const res = await callGeminiApi(geminiKey, "gemini-2.5-flash", systemPrompt, userPrompt);
       if (res && res.questions && res.questions.length > 0) return res;
     } catch (e) {
-      console.warn('[Question Generator] Gemini failed:', e.message);
+      console.warn("[Question Generator] Gemini failed:", e.message);
     }
   }
 
@@ -758,8 +891,8 @@ function getFallbackClarificationQuestions(prompt) {
           options: [
             { id: "opt1", label: "Mesin Kiosk On-Site + Cetak Kertas Thermal", isDefault: true },
             { id: "opt2", label: "Pendaftaran Online Mandiri (Web / WhatsApp Bot)" },
-            { id: "opt3", label: "Hybrid (Bisa On-site Kiosk dan Online dari Rumah)" }
-          ]
+            { id: "opt3", label: "Hybrid (Bisa On-site Kiosk dan Online dari Rumah)" },
+          ],
         },
         {
           id: "q2",
@@ -768,8 +901,8 @@ function getFallbackClarificationQuestions(prompt) {
           options: [
             { id: "opt1", label: "Layar TV Utama + Suara Suara Panggilan Otomatis (TTS)", isDefault: true },
             { id: "opt2", label: "Display Mini di Depan Pintu Setiap Poli Dokter" },
-            { id: "opt3", label: "Notifikasi WhatsApp Peringatan H-3 Giliran Antrean" }
-          ]
+            { id: "opt3", label: "Notifikasi WhatsApp Peringatan H-3 Giliran Antrean" },
+          ],
         },
         {
           id: "q3",
@@ -778,10 +911,10 @@ function getFallbackClarificationQuestions(prompt) {
           options: [
             { id: "opt1", label: "Standar SOAP Lengkap + Integrasi SATUSEHAT", isDefault: true },
             { id: "opt2", label: "Form Input Cepat (Diagnosa ICD-10 + Resep Obat)" },
-            { id: "opt3", label: "Riwayat Kunjungan + Lampiran File Hasil Lab/Rontgen" }
-          ]
-        }
-      ]
+            { id: "opt3", label: "Riwayat Kunjungan + Lampiran File Hasil Lab/Rontgen" },
+          ],
+        },
+      ],
     };
   }
 
@@ -796,8 +929,8 @@ function getFallbackClarificationQuestions(prompt) {
           options: [
             { id: "opt1", label: "Kasir Langsung (Order & Bayar di Counter)", isDefault: true },
             { id: "opt2", label: "Self-Order QR Code di Meja (Dine-in Order)" },
-            { id: "opt3", label: "Omnichannel (Kasir + Self-Order QR + Takeaway)" }
-          ]
+            { id: "opt3", label: "Omnichannel (Kasir + Self-Order QR + Takeaway)" },
+          ],
         },
         {
           id: "q2",
@@ -806,8 +939,8 @@ function getFallbackClarificationQuestions(prompt) {
           options: [
             { id: "opt1", label: "Kitchen Display System (Layar Monitor Realtime)", isDefault: true },
             { id: "opt2", label: "Auto Cetak Struk ke Printer Thermal Dapur & Bar" },
-            { id: "opt3", label: "Keduanya (Layar KDS + Cetak Printer Checker)" }
-          ]
+            { id: "opt3", label: "Keduanya (Layar KDS + Cetak Printer Checker)" },
+          ],
         },
         {
           id: "q3",
@@ -816,10 +949,10 @@ function getFallbackClarificationQuestions(prompt) {
           options: [
             { id: "opt1", label: "Cash + QRIS Dinamis Instan", isDefault: true },
             { id: "opt2", label: "Integrasi EDC Bank, Kartu Debit/Kredit, & E-Wallet" },
-            { id: "opt3", label: "Split Bill + Pay Later / Open Tab Pelanggan" }
-          ]
-        }
-      ]
+            { id: "opt3", label: "Split Bill + Pay Later / Open Tab Pelanggan" },
+          ],
+        },
+      ],
     };
   }
 
@@ -833,8 +966,8 @@ function getFallbackClarificationQuestions(prompt) {
         options: [
           { id: "opt1", label: "B2C Publik (Pengunjung umum mandiri tanpa login rumit)", isDefault: true },
           { id: "opt2", label: "Internal Perusahaan / Staf Operasional (Perlu Role & Permission)" },
-          { id: "opt3", label: "Multi-Tenant SaaS (Banyak organisasi/merchant dengan data terpisah)" }
-        ]
+          { id: "opt3", label: "Multi-Tenant SaaS (Banyak organisasi/merchant dengan data terpisah)" },
+        ],
       },
       {
         id: "q2",
@@ -843,8 +976,8 @@ function getFallbackClarificationQuestions(prompt) {
         options: [
           { id: "opt1", label: "Ya, Live Updates Instan (Websocket / Polling otomatis)", isDefault: true },
           { id: "opt2", label: "Cukup Refresh Normal / Standar REST API" },
-          { id: "opt3", label: "Offline-First (Bisa dipakai saat internet terputus lalu sync)" }
-        ]
+          { id: "opt3", label: "Offline-First (Bisa dipakai saat internet terputus lalu sync)" },
+        ],
       },
       {
         id: "q3",
@@ -853,10 +986,10 @@ function getFallbackClarificationQuestions(prompt) {
         options: [
           { id: "opt1", label: "WhatsApp Gateway API (Pesan Otomatis ke HP Pelanggan)", isDefault: true },
           { id: "opt2", label: "Email Notifikasi HTML + In-App Push Alert" },
-          { id: "opt3", label: "Ekspor Laporan Resmi (PDF & Excel / Spreadsheet)" }
-        ]
-      }
-    ]
+          { id: "opt3", label: "Ekspor Laporan Resmi (PDF & Excel / Spreadsheet)" },
+        ],
+      },
+    ],
   };
 }
 
@@ -864,18 +997,18 @@ function getFallbackClarificationQuestions(prompt) {
 // REAL CLOUD AI GENERATOR (Gemini / Anthropic / OpenRouter / OpenAI)
 // ============================================================================
 
-async function generatePrdWithAi(userIdea, language = 'id') {
+async function generatePrdWithAi(userIdea, language = "id") {
   const geminiKey = process.env.GEMINI_API_KEY;
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const openrouterKey = process.env.OPENROUTER_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
   const ninerouterBase = process.env.NINEROUTER_API_BASE;
-  const ninerouterKey = process.env.NINEROUTER_API_KEY || 'sk-9router';
-  const ninerouterModel = process.env.NINEROUTER_PRD_MODEL || process.env.NINEROUTER_MODEL || 'coding-prd';
+  const ninerouterKey = process.env.NINEROUTER_API_KEY;
+  const ninerouterModel = process.env.NINEROUTER_PRD_MODEL || process.env.NINEROUTER_MODEL || DEFAULT_PRD_MODEL;
 
   const systemPrompt = `You are a Principal Product Manager & System Architect.
 Given a product idea, generate a complete, production-ready Project Requirements Document (PRD), 4 Phased Roadmap, 12 Sub-features, and 40+ detailed actionable tasks formatted STRICTLY as valid JSON.
-Language for descriptions: ${language === 'id' ? 'Bahasa Indonesia' : 'English'}.
+Language for descriptions: ${language === "id" ? "Bahasa Indonesia" : "English"}.
 
 Output JSON schema must strictly match:
 {
@@ -1005,8 +1138,8 @@ Ensure all 4 phases (Phase 1 to Phase 4) each contain 3 sub-features (total 12 s
   }
 
   // 1. PRIMARY: Google Gemini API (gemini-3.7-flash, gemini-2.5-flash, gemini-2.5-pro)
-  if (geminiKey && !geminiKey.includes('YOUR_')) {
-    const geminiModels = ['gemini-3.7-flash', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-flash-latest', 'gemini-pro-latest'];
+  if (geminiKey && !geminiKey.includes("YOUR_")) {
+    const geminiModels = ["gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-flash-latest", "gemini-pro-latest"];
     for (const model of geminiModels) {
       try {
         console.log(`[AI Generator] Calling Google Gemini API (${model})...`);
@@ -1022,8 +1155,8 @@ Ensure all 4 phases (Phase 1 to Phase 4) each contain 3 sub-features (total 12 s
   }
 
   // 2. FALLBACK: OpenRouter Models (DeepSeek, Gemini Exp, Llama 3.3)
-  if (openrouterKey && !openrouterKey.includes('YOUR_')) {
-    const routerModels = ['deepseek/deepseek-chat', 'google/gemini-2.0-flash-exp:free', 'meta-llama/llama-3.3-70b-instruct:free'];
+  if (openrouterKey && !openrouterKey.includes("YOUR_")) {
+    const routerModels = ["deepseek/deepseek-chat", "google/gemini-2.0-flash-exp:free", "meta-llama/llama-3.3-70b-instruct:free"];
     for (const model of routerModels) {
       try {
         console.log(`[AI Generator] Calling OpenRouter API (${model})...`);
@@ -1036,29 +1169,29 @@ Ensure all 4 phases (Phase 1 to Phase 4) each contain 3 sub-features (total 12 s
   }
 
   // 3. FALLBACK: OpenAI API (GPT-4o-mini)
-  if (openaiKey && !openaiKey.includes('YOUR_')) {
+  if (openaiKey && !openaiKey.includes("YOUR_")) {
     try {
-      console.log('[AI Generator] Calling OpenAI API (gpt-4o-mini)...');
+      console.log("[AI Generator] Calling OpenAI API (gpt-4o-mini)...");
       const res = await callOpenAiApi(openaiKey, systemPrompt, userPrompt);
       if (res && res.project) return res;
     } catch (e) {
-      console.warn('[AI Generator] OpenAI call failed:', e.message);
+      console.warn("[AI Generator] OpenAI call failed:", e.message);
     }
   }
 
   // 4. FALLBACK: Anthropic Claude API
-  if (anthropicKey && !anthropicKey.includes('YOUR_')) {
+  if (anthropicKey && !anthropicKey.includes("YOUR_")) {
     try {
-      console.log('[AI Generator] Calling Anthropic Claude API...');
+      console.log("[AI Generator] Calling Anthropic Claude API...");
       const res = await callAnthropicApi(anthropicKey, systemPrompt, userPrompt);
       if (res && res.project) return res;
     } catch (e) {
-      console.warn('[AI Generator] Anthropic call failed:', e.message);
+      console.warn("[AI Generator] Anthropic call failed:", e.message);
     }
   }
 
   // 5. Smart Dynamic Synthesizer (Zero-Failure Fallback tailored to the prompt)
-  console.log('[AI Generator] Using Smart Production Synthesizer for custom prompt...');
+  console.log("[AI Generator] Using Smart Production Synthesizer for custom prompt...");
   return synthesizeCustomPrd(userIdea, language);
 }
 
@@ -1066,37 +1199,40 @@ Ensure all 4 phases (Phase 1 to Phase 4) each contain 3 sub-features (total 12 s
 function callGeminiApi(apiKey, model, systemPrompt, userPrompt) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify({
-      contents: [
-        { role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }
-      ],
+      contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
       generationConfig: {
         temperature: 0.2,
-        responseMimeType: 'application/json'
-      }
+        responseMimeType: "application/json",
+      },
     });
 
     const options = {
-      hostname: 'generativelanguage.googleapis.com',
+      hostname: "generativelanguage.googleapis.com",
       path: `/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
-      }
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(postData),
+      },
     };
 
     const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => {
+      let data = "";
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+      res.on("end", () => {
         try {
           const parsed = JSON.parse(data);
           if (parsed.candidates && parsed.candidates[0] && parsed.candidates[0].content) {
             const rawText = parsed.candidates[0].content.parts[0].text;
-            const cleaned = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+            const cleaned = rawText
+              .replace(/```json/g, "")
+              .replace(/```/g, "")
+              .trim();
             resolve(JSON.parse(cleaned));
           } else {
-            reject(new Error(parsed.error?.message || 'Gemini response empty'));
+            reject(new Error(parsed.error?.message || "Gemini response empty"));
           }
         } catch (err) {
           reject(err);
@@ -1104,8 +1240,10 @@ function callGeminiApi(apiKey, model, systemPrompt, userPrompt) {
       });
     });
 
-    req.on('error', reject);
-    req.setTimeout(60000, () => { req.destroy(new Error('Gemini API timeout')); });
+    req.on("error", reject);
+    req.setTimeout(60000, () => {
+      req.destroy(new Error("Gemini API timeout"));
+    });
     req.write(postData);
     req.end();
   });
@@ -1117,37 +1255,42 @@ function callOpenRouterApi(apiKey, model, systemPrompt, userPrompt) {
     const postData = JSON.stringify({
       model: model,
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
       ],
-      temperature: 0.2
+      temperature: 0.2,
     });
 
     const options = {
-      hostname: 'openrouter.ai',
-      path: '/api/v1/chat/completions',
-      method: 'POST',
+      hostname: "openrouter.ai",
+      path: "/api/v1/chat/completions",
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': 'http://localhost:4000',
-        'X-Title': 'OpenClaw PRD Maker',
-        'Content-Length': Buffer.byteLength(postData)
-      }
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": "http://localhost:4000",
+        "X-Title": "OpenClaw PRD Maker",
+        "Content-Length": Buffer.byteLength(postData),
+      },
     };
 
     const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => {
+      let data = "";
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+      res.on("end", () => {
         try {
           const parsed = JSON.parse(data);
           if (parsed.choices && parsed.choices[0]) {
             const raw = parsed.choices[0].message.content;
-            const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim();
+            const cleaned = raw
+              .replace(/```json/g, "")
+              .replace(/```/g, "")
+              .trim();
             resolve(JSON.parse(cleaned));
           } else {
-            reject(new Error(parsed.error?.message || 'OpenRouter response empty'));
+            reject(new Error(parsed.error?.message || "OpenRouter response empty"));
           }
         } catch (err) {
           reject(err);
@@ -1155,8 +1298,10 @@ function callOpenRouterApi(apiKey, model, systemPrompt, userPrompt) {
       });
     });
 
-    req.on('error', reject);
-    req.setTimeout(60000, () => { req.destroy(new Error('OpenRouter API timeout')); });
+    req.on("error", reject);
+    req.setTimeout(60000, () => {
+      req.destroy(new Error("OpenRouter API timeout"));
+    });
     req.write(postData);
     req.end();
   });
@@ -1166,37 +1311,42 @@ function callOpenRouterApi(apiKey, model, systemPrompt, userPrompt) {
 function callAnthropicApi(apiKey, systemPrompt, userPrompt) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify({
-      model: 'claude-3-5-sonnet-20241022',
+      model: "claude-3-5-sonnet-20241022",
       max_tokens: 4096,
       system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-      temperature: 0.2
+      messages: [{ role: "user", content: userPrompt }],
+      temperature: 0.2,
     });
 
     const options = {
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
-      method: 'POST',
+      hostname: "api.anthropic.com",
+      path: "/v1/messages",
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Length': Buffer.byteLength(postData)
-      }
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Length": Buffer.byteLength(postData),
+      },
     };
 
     const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => {
+      let data = "";
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+      res.on("end", () => {
         try {
           const parsed = JSON.parse(data);
           if (parsed.content && parsed.content[0]) {
             const raw = parsed.content[0].text;
-            const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim();
+            const cleaned = raw
+              .replace(/```json/g, "")
+              .replace(/```/g, "")
+              .trim();
             resolve(JSON.parse(cleaned));
           } else {
-            reject(new Error(parsed.error?.message || 'Claude response empty'));
+            reject(new Error(parsed.error?.message || "Claude response empty"));
           }
         } catch (err) {
           reject(err);
@@ -1204,8 +1354,10 @@ function callAnthropicApi(apiKey, systemPrompt, userPrompt) {
       });
     });
 
-    req.on('error', reject);
-    req.setTimeout(60000, () => { req.destroy(new Error('Claude API timeout')); });
+    req.on("error", reject);
+    req.setTimeout(60000, () => {
+      req.destroy(new Error("Claude API timeout"));
+    });
     req.write(postData);
     req.end();
   });
@@ -1215,36 +1367,38 @@ function callAnthropicApi(apiKey, systemPrompt, userPrompt) {
 function callOpenAiApi(apiKey, systemPrompt, userPrompt) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: "gpt-4o-mini",
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
       ],
-      response_format: { type: 'json_object' },
-      temperature: 0.2
+      response_format: { type: "json_object" },
+      temperature: 0.2,
     });
 
     const options = {
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
-      method: 'POST',
+      hostname: "api.openai.com",
+      path: "/v1/chat/completions",
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Length': Buffer.byteLength(postData)
-      }
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Length": Buffer.byteLength(postData),
+      },
     };
 
     const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => {
+      let data = "";
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+      res.on("end", () => {
         try {
           const parsed = JSON.parse(data);
           if (parsed.choices && parsed.choices[0]) {
             resolve(JSON.parse(parsed.choices[0].message.content));
           } else {
-            reject(new Error(parsed.error?.message || 'OpenAI response empty'));
+            reject(new Error(parsed.error?.message || "OpenAI response empty"));
           }
         } catch (err) {
           reject(err);
@@ -1252,76 +1406,131 @@ function callOpenAiApi(apiKey, systemPrompt, userPrompt) {
       });
     });
 
-    req.on('error', reject);
-    req.setTimeout(60000, () => { req.destroy(new Error('OpenAI API timeout')); });
+    req.on("error", reject);
+    req.setTimeout(60000, () => {
+      req.destroy(new Error("OpenAI API timeout"));
+    });
     req.write(postData);
     req.end();
   });
 }
 
 // Call 9Router AI Gateway (OpenAI-Compatible Local/VPS Proxy)
+function tryParseJson(text) {
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function extractChoiceContent(parsed) {
+  const choice = parsed && Array.isArray(parsed.choices) ? parsed.choices[0] : null;
+  if (!choice) return "";
+  const carrier = choice.delta || choice.message || {};
+  return typeof carrier.content === "string" ? carrier.content : "";
+}
+
+const SSE_FIELD_LINE = /^(data|event|id|retry):/;
+const SSE_DONE_LINE = /^data:\s*\[DONE\]$/;
+const SSE_DONE_SUFFIX = /\s*data:\s*\[DONE\]\s*$/;
+
+function parseSseContent(body) {
+  const lines = body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  let matchedChunk = false;
+  let text = "";
+
+  for (const line of lines) {
+    if (line.startsWith(":")) continue;
+    if (!SSE_FIELD_LINE.test(line)) return "";
+    if (SSE_DONE_LINE.test(line)) continue;
+    if (!line.startsWith("data:")) continue;
+
+    const chunk = tryParseJson(line.slice(5).trim());
+    if (!chunk) return "";
+    matchedChunk = true;
+    text += extractChoiceContent(chunk);
+  }
+
+  return matchedChunk ? text : "";
+}
+
+function parseNineRouterContent(rawBody) {
+  const body = String(rawBody == null ? "" : rawBody).trim();
+  if (!body) return "";
+
+  const whole = tryParseJson(body);
+  if (whole) return extractChoiceContent(whole);
+
+  const withoutTerminator = body
+    .split("\n")
+    .filter((line) => !SSE_DONE_LINE.test(line.trim()))
+    .join("\n")
+    .replace(SSE_DONE_SUFFIX, "")
+    .trim();
+
+  if (withoutTerminator !== body) {
+    const trailingDone = tryParseJson(withoutTerminator);
+    if (trailingDone) return extractChoiceContent(trailingDone);
+  }
+
+  return parseSseContent(body);
+}
+
 function callNineRouterApi(apiBase, apiKey, model, systemPrompt, userPrompt) {
   return new Promise((resolve, reject) => {
     try {
-      const fullUrl = apiBase.endsWith('/chat/completions') ? apiBase : `${apiBase.replace(/\/+$/, '')}/chat/completions`;
+      const fullUrl = apiBase.endsWith("/chat/completions") ? apiBase : `${apiBase.replace(/\/+$/, "")}/chat/completions`;
       const parsedUrl = new URL(fullUrl);
       const postData = JSON.stringify({
-        model: model || 'coding-prd',
+        model: model || DEFAULT_PRD_MODEL,
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
         ],
-        temperature: 0.2
+        temperature: 0.2,
       });
 
-      const isHttps = parsedUrl.protocol === 'https:';
+      const isHttps = parsedUrl.protocol === "https:";
       const httpLib = isHttps ? https : http;
+
+      const headers = {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(postData),
+      };
+      if (apiKey) {
+        headers.Authorization = `Bearer ${apiKey}`;
+      }
 
       const options = {
         hostname: parsedUrl.hostname,
         port: parsedUrl.port || (isHttps ? 443 : 80),
         path: `${parsedUrl.pathname}${parsedUrl.search}`,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey || 'sk-9router'}`,
-          'Content-Length': Buffer.byteLength(postData)
-        }
+        method: "POST",
+        headers,
       };
 
       const req = httpLib.request(options, (res) => {
-        let data = '';
-        res.on('data', chunk => { data += chunk; });
-        res.on('end', () => {
+        let data = "";
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        res.on("end", () => {
           try {
-            let fullText = '';
-            if (data.includes('data:')) {
-              const lines = data.split('\n');
-              for (const line of lines) {
-                const trimmed = line.trim();
-                if (trimmed.startsWith('data:') && !trimmed.includes('[DONE]')) {
-                  try {
-                    const jsonStr = trimmed.slice(5).trim();
-                    const parsedLine = JSON.parse(jsonStr);
-                    if (parsedLine.choices && parsedLine.choices[0]) {
-                      const delta = parsedLine.choices[0].delta?.content || parsedLine.choices[0].message?.content || '';
-                      fullText += delta;
-                    }
-                  } catch (e) {}
-                }
-              }
-            } else {
-              const parsed = JSON.parse(data);
-              if (parsed.choices && parsed.choices[0] && parsed.choices[0].message) {
-                fullText = parsed.choices[0].message.content;
-              }
-            }
+            const fullText = parseNineRouterContent(data);
 
             if (!fullText) {
-              return reject(new Error('9Router response empty or invalid'));
+              return reject(new Error("9Router response empty or invalid"));
             }
 
-            const cleaned = fullText.replace(/```json/g, '').replace(/```/g, '').trim();
+            const cleaned = fullText
+              .replace(/```json/g, "")
+              .replace(/```/g, "")
+              .trim();
             resolve(JSON.parse(cleaned));
           } catch (err) {
             reject(err);
@@ -1329,8 +1538,10 @@ function callNineRouterApi(apiBase, apiKey, model, systemPrompt, userPrompt) {
         });
       });
 
-      req.on('error', reject);
-      req.setTimeout(90000, () => { req.destroy(new Error('9Router Gateway timeout')); });
+      req.on("error", reject);
+      req.setTimeout(getNineRouterTimeoutMs(), () => {
+        req.destroy(new Error("9Router Gateway timeout"));
+      });
       req.write(postData);
       req.end();
     } catch (e) {
@@ -1341,8 +1552,16 @@ function callNineRouterApi(apiBase, apiKey, model, systemPrompt, userPrompt) {
 
 // Dynamic Synthesizer (Tailors full PRD to prompt keywords)
 function synthesizeCustomPrd(prompt, language) {
-  const cleanTitle = prompt.split('.')[0].split(',')[0].replace(/^["']|["']$/g, '').trim();
-  const slug = cleanTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'custom-app';
+  const cleanTitle = prompt
+    .split(".")[0]
+    .split(",")[0]
+    .replace(/^["']|["']$/g, "")
+    .trim();
+  const slug =
+    cleanTitle
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "custom-app";
 
   return {
     project: {
@@ -1360,8 +1579,8 @@ function synthesizeCustomPrd(prompt, language) {
         { name: "Backend / API", value: "Node.js / Next.js Server Actions & REST API" },
         { name: "Database", value: "PostgreSQL with Prisma ORM" },
         { name: "Authentication", value: "NextAuth.js (OAuth & Magic Link)" },
-        { name: "Payment & Integrasi", value: "Midtrans / Xendit / WhatsApp API" }
-      ]
+        { name: "Payment & Integrasi", value: "Midtrans / Xendit / WhatsApp API" },
+      ],
     },
     phases: [
       {
@@ -1381,8 +1600,8 @@ function synthesizeCustomPrd(prompt, language) {
               { id: "task-101", title: `Rancang komponen antarmuka katalog untuk ${cleanTitle}`, status: "todo", priority: "Utama" },
               { id: "task-102", title: "Implementasi filter pencarian multi-kategori dan sorting", status: "todo", priority: "Utama" },
               { id: "task-103", title: "Optimasi responsif tampilan mobile smartphone", status: "todo", priority: "Sedang" },
-              { id: "task-104", title: "Integrasi skeleton loading state saat fetching data", status: "todo", priority: "Sedang" }
-            ]
+              { id: "task-104", title: "Integrasi skeleton loading state saat fetching data", status: "todo", priority: "Sedang" },
+            ],
           },
           {
             id: "sub-1-2",
@@ -1391,8 +1610,8 @@ function synthesizeCustomPrd(prompt, language) {
             tasks: [
               { id: "task-105", title: "Buat form input pemesanan dengan validasi schema Zod", status: "todo", priority: "Utama" },
               { id: "task-106", title: "Kalkulator dinamis harga, diskon, dan biaya admin", status: "todo", priority: "Utama" },
-              { id: "task-107", title: "Fitur penahanan slot / stock holding lock 10 menit", status: "todo", priority: "Utama" }
-            ]
+              { id: "task-107", title: "Fitur penahanan slot / stock holding lock 10 menit", status: "todo", priority: "Utama" },
+            ],
           },
           {
             id: "sub-1-3",
@@ -1401,10 +1620,10 @@ function synthesizeCustomPrd(prompt, language) {
             tasks: [
               { id: "task-108", title: "Integrasi Payment Gateway Snap Popup checkout", status: "todo", priority: "Utama" },
               { id: "task-109", title: "Webhook receiver verifikasi status sukses pembayaran", status: "todo", priority: "Utama" },
-              { id: "task-110", title: "Halaman sukses pembayaran dengan invoice digital & QR tiket", status: "todo", priority: "Utama" }
-            ]
-          }
-        ]
+              { id: "task-110", title: "Halaman sukses pembayaran dengan invoice digital & QR tiket", status: "todo", priority: "Utama" },
+            ],
+          },
+        ],
       },
       {
         id: "phase-2",
@@ -1422,8 +1641,8 @@ function synthesizeCustomPrd(prompt, language) {
             tasks: [
               { id: "task-201", title: "Buat layout dashboard admin dengan sidebar dan metrics card", status: "todo", priority: "Utama" },
               { id: "task-202", title: "Tabel pesanan dengan filter status (Pending, Lunas, Selesai, Batal)", status: "todo", priority: "Utama" },
-              { id: "task-203", title: "Fitur export rekap transaksi ke format Excel/CSV", status: "todo", priority: "Sedang" }
-            ]
+              { id: "task-203", title: "Fitur export rekap transaksi ke format Excel/CSV", status: "todo", priority: "Sedang" },
+            ],
           },
           {
             id: "sub-2-2",
@@ -1432,8 +1651,8 @@ function synthesizeCustomPrd(prompt, language) {
             tasks: [
               { id: "task-204", title: "Formulir CRUD data master lengkap dengan upload gambar", status: "todo", priority: "Utama" },
               { id: "task-205", title: "Fitur toggle on/off status ketersediaan instan", status: "todo", priority: "Sedang" },
-              { id: "task-206", title: "Pengaturan harga khusus dan diskon promo berkala", status: "todo", priority: "Sedang" }
-            ]
+              { id: "task-206", title: "Pengaturan harga khusus dan diskon promo berkala", status: "todo", priority: "Sedang" },
+            ],
           },
           {
             id: "sub-2-3",
@@ -1442,10 +1661,10 @@ function synthesizeCustomPrd(prompt, language) {
             tasks: [
               { id: "task-207", title: "Integrasi visual chart pendapatan menggunakan Chart.js/Recharts", status: "todo", priority: "Utama" },
               { id: "task-208", title: "Ringkasan metrik total revenue, pesanan sukses, dan pelanggan baru", status: "todo", priority: "Utama" },
-              { id: "task-209", title: "Laporan rekap laba kotor & bersih berkala", status: "todo", priority: "Rendah" }
-            ]
-          }
-        ]
+              { id: "task-209", title: "Laporan rekap laba kotor & bersih berkala", status: "todo", priority: "Rendah" },
+            ],
+          },
+        ],
       },
       {
         id: "phase-3",
@@ -1464,8 +1683,8 @@ function synthesizeCustomPrd(prompt, language) {
               { id: "task-301", title: "Halaman register dengan validasi email dan nomor HP unik", status: "todo", priority: "Utama" },
               { id: "task-302", title: "Integrasi Google OAuth untuk login 1-klik", status: "todo", priority: "Utama" },
               { id: "task-303", title: "Middleware proteksi session JWT route admin & user", status: "todo", priority: "Utama" },
-              { id: "task-304", title: "Alur lupa password dengan reset token via email", status: "todo", priority: "Sedang" }
-            ]
+              { id: "task-304", title: "Alur lupa password dengan reset token via email", status: "todo", priority: "Sedang" },
+            ],
           },
           {
             id: "sub-3-2",
@@ -1474,8 +1693,8 @@ function synthesizeCustomPrd(prompt, language) {
             tasks: [
               { id: "task-305", title: "Halaman edit profil pengguna dan ganti kata sandi", status: "todo", priority: "Sedang" },
               { id: "task-306", title: "Daftar riwayat transaksi dengan detail status dan barcode", status: "todo", priority: "Utama" },
-              { id: "task-307", title: "Fitur unduh struk/invoice PDF resmi per transaksi", status: "todo", priority: "Sedang" }
-            ]
+              { id: "task-307", title: "Fitur unduh struk/invoice PDF resmi per transaksi", status: "todo", priority: "Sedang" },
+            ],
           },
           {
             id: "sub-3-3",
@@ -1484,10 +1703,10 @@ function synthesizeCustomPrd(prompt, language) {
             tasks: [
               { id: "task-308", title: "Skema RBAC di database untuk role Admin vs Customer", status: "todo", priority: "Utama" },
               { id: "task-309", title: "Guard proteksi endpoint API backend berdasarkan role", status: "todo", priority: "Utama" },
-              { id: "task-310", title: "Log audit aktivitas perubahan data penting oleh admin", status: "todo", priority: "Rendah" }
-            ]
-          }
-        ]
+              { id: "task-310", title: "Log audit aktivitas perubahan data penting oleh admin", status: "todo", priority: "Rendah" },
+            ],
+          },
+        ],
       },
       {
         id: "phase-4",
@@ -1505,8 +1724,8 @@ function synthesizeCustomPrd(prompt, language) {
             tasks: [
               { id: "task-401", title: "Integrasi WhatsApp Gateway API (Fonnte / Twilio)", status: "todo", priority: "Utama" },
               { id: "task-402", title: "Template pesan WA konfirmasi sukses beserta link tiket", status: "todo", priority: "Utama" },
-              { id: "task-403", title: "Cron job background worker untuk pengingat jadwal otomatis", status: "todo", priority: "Utama" }
-            ]
+              { id: "task-403", title: "Cron job background worker untuk pengingat jadwal otomatis", status: "todo", priority: "Utama" },
+            ],
           },
           {
             id: "sub-4-2",
@@ -1515,49 +1734,49 @@ function synthesizeCustomPrd(prompt, language) {
             tasks: [
               { id: "task-404", title: "Template email HTML konfirmasi pemesanan dengan lampiran", status: "todo", priority: "Sedang" },
               { id: "task-405", title: "Komponen toast notifikasi real-time di antarmuka webapp", status: "todo", priority: "Sedang" },
-              { id: "task-406", title: "Sistem antrean retry otomatis bila gateway pesan gagal kirim", status: "todo", priority: "Sedang" }
-            ]
-          }
-        ]
-      }
+              { id: "task-406", title: "Sistem antrean retry otomatis bila gateway pesan gagal kirim", status: "todo", priority: "Sedang" },
+            ],
+          },
+        ],
+      },
     ],
     prdSections: [
       {
         id: "overview",
         title: "1. Overview",
-        content: `### 1. Overview Proyek\n\n**Nama Produk:** ${cleanTitle}  \n**Tujuan Utama:** Mengotomatiskan seluruh alur operasional dan transaksi menjadi pengalaman digital instan.\n\n#### Masalah yang Diselesaikan:\n- Proses konvensional masih membutuhkan banyak waktu dan koordinasi manual.\n- Pelanggan menginginkan proses mandiri instan dengan transparansi status real-time.\n- Rekapitulasi transaksi manual rawan selisih dan kurang efisien.`
+        content: `### 1. Overview Proyek\n\n**Nama Produk:** ${cleanTitle}  \n**Tujuan Utama:** Mengotomatiskan seluruh alur operasional dan transaksi menjadi pengalaman digital instan.\n\n#### Masalah yang Diselesaikan:\n- Proses konvensional masih membutuhkan banyak waktu dan koordinasi manual.\n- Pelanggan menginginkan proses mandiri instan dengan transparansi status real-time.\n- Rekapitulasi transaksi manual rawan selisih dan kurang efisien.`,
       },
       {
         id: "requirements",
         title: "2. Requirements",
-        content: `### 2. Kebutuhan Sistem & Spesifikasi Fungsional\n\n#### Functional Requirements:\n- **FR-01:** Pengguna dapat melihat daftar ketersediaan data secara real-time.\n- **FR-02:** Sistem mengunci resource selama proses checkout untuk menghindari konflik data ganda.\n- **FR-03:** Penerimaan pembayaran via QRIS dan Virtual Account dengan auto-verifikasi.\n- **FR-04:** Notifikasi WhatsApp instan dikirim otomatis ke pelanggan.\n- **FR-05:** Admin dapat mengatur data master, harga, dan memantau rekap pendapatan.\n\n#### Non-Functional Requirements:\n- **NFR-01 (Speed):** Response time halaman < 500ms.\n- **NFR-02 (Security):** Enkripsi SSL/TLS dan payment token standar PCI-DSS.`
+        content: `### 2. Kebutuhan Sistem & Spesifikasi Fungsional\n\n#### Functional Requirements:\n- **FR-01:** Pengguna dapat melihat daftar ketersediaan data secara real-time.\n- **FR-02:** Sistem mengunci resource selama proses checkout untuk menghindari konflik data ganda.\n- **FR-03:** Penerimaan pembayaran via QRIS dan Virtual Account dengan auto-verifikasi.\n- **FR-04:** Notifikasi WhatsApp instan dikirim otomatis ke pelanggan.\n- **FR-05:** Admin dapat mengatur data master, harga, dan memantau rekap pendapatan.\n\n#### Non-Functional Requirements:\n- **NFR-01 (Speed):** Response time halaman < 500ms.\n- **NFR-02 (Security):** Enkripsi SSL/TLS dan payment token standar PCI-DSS.`,
       },
       {
         id: "core-features",
         title: "3. Core Features",
-        isPhased: true
+        isPhased: true,
       },
       {
         id: "user-flow",
         title: "4. User Flow",
-        content: `### 4. Alur Pengguna (User Flow)\n\n\`\`\`\n[ Pengunjung Web ] ➔ [ Pilih Item/Layanan ] ➔ [ Isi Data & Checkout ] ➔ [ Bayar QRIS/VA ] ➔ [ Auto Verifikasi & Notif WA ]\n\`\`\``
+        content: `### 4. Alur Pengguna (User Flow)\n\n\`\`\`\n[ Pengunjung Web ] ➔ [ Pilih Item/Layanan ] ➔ [ Isi Data & Checkout ] ➔ [ Bayar QRIS/VA ] ➔ [ Auto Verifikasi & Notif WA ]\n\`\`\``,
       },
       {
         id: "architecture",
         title: "5. Architecture",
-        content: `### 5. Arsitektur Sistem\n\n- **Client Layer:** Next.js 14 App Router (SSR + Client Components)\n- **API Layer:** Server Actions & REST Endpoints\n- **Data Layer:** PostgreSQL with Prisma Client\n- **Third-Party:** Midtrans Payment Gateway, WhatsApp Gateway API`
+        content: `### 5. Arsitektur Sistem\n\n- **Client Layer:** Next.js 14 App Router (SSR + Client Components)\n- **API Layer:** Server Actions & REST Endpoints\n- **Data Layer:** PostgreSQL with Prisma Client\n- **Third-Party:** Midtrans Payment Gateway, WhatsApp Gateway API`,
       },
       {
         id: "db-schema",
         title: "6. Database Schema",
-        content: `### 6. Skema Database\n\n\`\`\`sql\nCREATE TABLE users (\n    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    name VARCHAR(100) NOT NULL,\n    email VARCHAR(150) UNIQUE NOT NULL,\n    phone VARCHAR(20) UNIQUE NOT NULL,\n    role VARCHAR(20) DEFAULT 'customer',\n    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()\n);\n\nCREATE TABLE transactions (\n    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    user_id UUID REFERENCES users(id),\n    total_amount DECIMAL(12, 2) NOT NULL,\n    status VARCHAR(30) DEFAULT 'pending',\n    payment_token VARCHAR(255),\n    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()\n);\n\`\`\``
+        content: `### 6. Skema Database\n\n\`\`\`sql\nCREATE TABLE users (\n    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    name VARCHAR(100) NOT NULL,\n    email VARCHAR(150) UNIQUE NOT NULL,\n    phone VARCHAR(20) UNIQUE NOT NULL,\n    role VARCHAR(20) DEFAULT 'customer',\n    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()\n);\n\nCREATE TABLE transactions (\n    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    user_id UUID REFERENCES users(id),\n    total_amount DECIMAL(12, 2) NOT NULL,\n    status VARCHAR(30) DEFAULT 'pending',\n    payment_token VARCHAR(255),\n    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()\n);\n\`\`\``,
       },
       {
         id: "tech-stack",
         title: "7. Tech Stack",
-        content: `### 7. Tech Stack Rekomendasi\n\n| Komponen | Teknologi | Alasan |\n|---|---|---|\n| **Framework** | Next.js 14 (App Router) | SEO kuat, SSR super cepat, fullstack capabilities |\n| **Styling** | Tailwind CSS | Konsistensi antarmuka & responsif modern |\n| **Database** | PostgreSQL | ACID compliance untuk transaksi andal |\n| **ORM** | Prisma | Type-safe query & kemudahan migrasi |\n| **Payment** | Midtrans / Xendit | Dukungan QRIS lengkap dan verifikasi instan |\n| **Messaging** | WhatsApp Gateway API | Saluran komunikasi utama pelanggan |`
-      }
-    ]
+        content: `### 7. Tech Stack Rekomendasi\n\n| Komponen | Teknologi | Alasan |\n|---|---|---|\n| **Framework** | Next.js 14 (App Router) | SEO kuat, SSR super cepat, fullstack capabilities |\n| **Styling** | Tailwind CSS | Konsistensi antarmuka & responsif modern |\n| **Database** | PostgreSQL | ACID compliance untuk transaksi andal |\n| **ORM** | Prisma | Type-safe query & kemudahan migrasi |\n| **Payment** | Midtrans / Xendit | Dukungan QRIS lengkap dan verifikasi instan |\n| **Messaging** | WhatsApp Gateway API | Saluran komunikasi utama pelanggan |`,
+      },
+    ],
   };
 }
 
@@ -1567,7 +1786,7 @@ function synthesizeCustomPrd(prompt, language) {
 const server = http.createServer(async (req, res) => {
   setCorsHeaders(res);
 
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     res.writeHead(204);
     res.end();
     return;
@@ -1579,85 +1798,87 @@ const server = http.createServer(async (req, res) => {
 
   try {
     // 1. GET /api/status
-    if (req.method === 'GET' && pathname === '/api/status') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        status: 'online',
-        agent: 'OpenClaw Autonomous Runner',
-        hasGemini: !!process.env.GEMINI_API_KEY,
-        hasOpenAI: !!process.env.OPENAI_API_KEY,
-        hasOpenRouter: !!process.env.OPENROUTER_API_KEY,
-        hasAnthropic: !!process.env.ANTHROPIC_API_KEY,
-        workspaceDir: OPENCLAW_WORKSPACE_DIR,
-        activeProject: state.activeProject ? state.activeProject.title : null,
-        totalTasks: state.tasks.length,
-        completedTasks: state.tasks.filter(t => t.status === 'done').length,
-        isRunning: state.isRunning,
-        isPaused: state.isPaused
-      }));
+    if (req.method === "GET" && pathname === "/api/status") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          status: "online",
+          agent: "OpenClaw Autonomous Runner",
+          hasGemini: !!process.env.GEMINI_API_KEY,
+          hasOpenAI: !!process.env.OPENAI_API_KEY,
+          hasOpenRouter: !!process.env.OPENROUTER_API_KEY,
+          hasAnthropic: !!process.env.ANTHROPIC_API_KEY,
+          workspaceDir: OPENCLAW_WORKSPACE_DIR,
+          activeProject: state.activeProject ? state.activeProject.title : null,
+          totalTasks: state.tasks.length,
+          completedTasks: state.tasks.filter((t) => t.status === "done").length,
+          isRunning: state.isRunning,
+          isPaused: state.isPaused,
+        }),
+      );
       return;
     }
 
     // 2. POST /api/generate-prd (REAL CLOUD AI GENERATION)
-    if (req.method === 'POST' && pathname === '/api/generate-prd') {
+    if (req.method === "POST" && pathname === "/api/generate-prd") {
       const body = await parseJsonBody(req);
       const { prompt, language } = body;
 
       if (!prompt) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Prompt is required' }));
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Prompt is required" }));
         return;
       }
 
       broadcastLog(`🧠 Memulai generate PRD dengan Cloud AI untuk: "${prompt}"...`);
 
       try {
-        const generatedData = await generatePrdWithAi(prompt, language || 'id');
-        broadcastLog(`✨ Berhasil meng-generate PRD untuk "${generatedData.project.title}"!`, 'success');
+        const generatedData = await generatePrdWithAi(prompt, language || "id");
+        broadcastLog(`✨ Berhasil meng-generate PRD untuk "${generatedData.project.title}"!`, "success");
 
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ success: true, data: generatedData }));
       } catch (aiErr) {
-        console.error('AI Generation Error:', aiErr);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
+        console.error("AI Generation Error:", aiErr);
+        res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: aiErr.message }));
       }
       return;
     }
 
     // 2.5. POST /api/generate-questions (AI Requirement Deep-Dive Interview)
-    if (req.method === 'POST' && pathname === '/api/generate-questions') {
+    if (req.method === "POST" && pathname === "/api/generate-questions") {
       const body = await parseJsonBody(req);
       const { prompt, language } = body;
 
       if (!prompt) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Prompt is required' }));
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Prompt is required" }));
         return;
       }
 
       broadcastLog(`🧠 [Interview] Menganalisis ide "${prompt.slice(0, 40)}..." untuk membuat pertanyaan klarifikasi...`);
 
       try {
-        const questionsData = await generateClarificationQuestions(prompt, language || 'id');
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        const questionsData = await generateClarificationQuestions(prompt, language || "id");
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ success: true, data: questionsData }));
       } catch (err) {
-        console.warn('AI Question Generation Error:', err.message);
+        console.warn("AI Question Generation Error:", err.message);
         // Fallback default questions
         const fallback = getFallbackClarificationQuestions(prompt);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ success: true, data: fallback }));
       }
       return;
     }
 
     // 3. GET /api/events (SSE Stream)
-    if (req.method === 'GET' && pathname === '/api/events') {
+    if (req.method === "GET" && pathname === "/api/events") {
       res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
       });
 
       const clientId = Date.now();
@@ -1666,20 +1887,20 @@ const server = http.createServer(async (req, res) => {
 
       broadcastLog(`Frontend terhubung ke OpenClaw Realtime Event Stream (ID: ${clientId})`);
 
-      req.on('close', () => {
-        state.sseClients = state.sseClients.filter(c => c.id !== clientId);
+      req.on("close", () => {
+        state.sseClients = state.sseClients.filter((c) => c.id !== clientId);
       });
       return;
     }
 
     // 4. POST /api/projects (Register Project & Save to OpenClaw Workspace)
-    if (req.method === 'POST' && pathname === '/api/projects') {
+    if (req.method === "POST" && pathname === "/api/projects") {
       const body = await parseJsonBody(req);
       const { project, phases, prdSections, tasks } = body;
 
       if (!project || !project.id) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Project data is required' }));
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Project data is required" }));
         return;
       }
 
@@ -1695,94 +1916,106 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Save tasks.json
-      fs.writeFileSync(
-        path.join(projectDir, 'tasks.json'),
-        JSON.stringify({ project, phases, tasks: state.tasks }, null, 2),
-        'utf-8'
-      );
+      fs.writeFileSync(path.join(projectDir, "tasks.json"), JSON.stringify({ project, phases, tasks: state.tasks }, null, 2), "utf-8");
 
       // Save prd.md
-      let mdContent = `# ${project.title}\n\n> **Versi:** ${project.version || 'v1.0.0'}  \n> **Status:** ${project.status || 'Perencanaan'}\n\n## 1. Problem Statement & Overview\n${project.problemStatement}\n\n`;
+      let mdContent = `# ${project.title}\n\n> **Versi:** ${project.version || "v1.0.0"}  \n> **Status:** ${project.status || "Perencanaan"}\n\n## 1. Problem Statement & Overview\n${project.problemStatement}\n\n`;
       if (prdSections) {
-        prdSections.forEach(sec => {
-          if (sec.id !== 'overview') {
-            mdContent += `\n\n${sec.content || ''}`;
+        prdSections.forEach((sec) => {
+          if (sec.id !== "overview") {
+            mdContent += `\n\n${sec.content || ""}`;
           }
         });
       }
-      fs.writeFileSync(path.join(projectDir, 'prd.md'), mdContent, 'utf-8');
+      fs.writeFileSync(path.join(projectDir, "prd.md"), mdContent, "utf-8");
 
       // Scaffolding base files (package.json, README.md, .gitignore)
-      const packageJsonPath = path.join(projectDir, 'package.json');
+      const packageJsonPath = path.join(projectDir, "package.json");
       if (!fs.existsSync(packageJsonPath)) {
-        fs.writeFileSync(packageJsonPath, JSON.stringify({
-          name: project.id,
-          version: project.version || '1.0.0',
-          description: project.tagline || project.title,
-          private: true,
-          scripts: {
-            dev: "next dev",
-            build: "next build",
-            start: "next start",
-            lint: "next lint"
-          },
-          dependencies: {
-            next: "^14.2.0",
-            react: "^18.3.0",
-            "react-dom": "^18.3.0",
-            "lucide-react": "^0.360.0",
-            "clsx": "^2.1.0",
-            "tailwind-merge": "^2.2.0"
-          },
-          devDependencies: {
-            tailwindcss: "^3.4.0",
-            postcss: "^8.4.0",
-            autoprefixer: "^10.4.0",
-            typescript: "^5.4.0",
-            "@types/node": "^20.0.0",
-            "@types/react": "^18.3.0",
-            "@types/react-dom": "^18.3.0"
-          }
-        }, null, 2), 'utf-8');
+        fs.writeFileSync(
+          packageJsonPath,
+          JSON.stringify(
+            {
+              name: project.id,
+              version: project.version || "1.0.0",
+              description: project.tagline || project.title,
+              private: true,
+              scripts: {
+                dev: "next dev",
+                build: "next build",
+                start: "next start",
+                lint: "next lint",
+              },
+              dependencies: {
+                next: "^14.2.0",
+                react: "^18.3.0",
+                "react-dom": "^18.3.0",
+                "lucide-react": "^0.360.0",
+                clsx: "^2.1.0",
+                "tailwind-merge": "^2.2.0",
+              },
+              devDependencies: {
+                tailwindcss: "^3.4.0",
+                postcss: "^8.4.0",
+                autoprefixer: "^10.4.0",
+                typescript: "^5.4.0",
+                "@types/node": "^20.0.0",
+                "@types/react": "^18.3.0",
+                "@types/react-dom": "^18.3.0",
+              },
+            },
+            null,
+            2,
+          ),
+          "utf-8",
+        );
       }
 
-      const readmePath = path.join(projectDir, 'README.md');
+      const readmePath = path.join(projectDir, "README.md");
       if (!fs.existsSync(readmePath)) {
-        fs.writeFileSync(readmePath, `# ${project.title}\n\n> ${project.tagline}\n\n## Deskripsi Proyek\n${project.problemStatement}\n\n## Struktur Roadmap\n- Total Fitur: ${phases ? phases.length : 4} Fase\n- Total Task: ${state.tasks.length} Tasks\n\n## Cara Menjalankan\n\`\`\`bash\nnpm install\nnpm run dev\n\`\`\`\n\n*Generated by OpenClaw Autonomous Engine*\n`, 'utf-8');
+        fs.writeFileSync(
+          readmePath,
+          `# ${project.title}\n\n> ${project.tagline}\n\n## Deskripsi Proyek\n${project.problemStatement}\n\n## Struktur Roadmap\n- Total Fitur: ${phases ? phases.length : 4} Fase\n- Total Task: ${state.tasks.length} Tasks\n\n## Cara Menjalankan\n\`\`\`bash\nnpm install\nnpm run dev\n\`\`\`\n\n*Generated by OpenClaw Autonomous Engine*\n`,
+          "utf-8",
+        );
       }
 
       broadcastLog(`Proyek "${project.title}" (${state.tasks.length} tasks) tersimpan di OpenClaw: ${projectDir}`);
-      broadcastEvent('project_initialized', { project, totalTasks: state.tasks.length });
+      broadcastEvent("project_initialized", { project, totalTasks: state.tasks.length });
 
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        success: true,
-        message: 'Project created in OpenClaw workspace',
-        workspacePath: projectDir,
-        totalTasks: state.tasks.length
-      }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          success: true,
+          message: "Project created in OpenClaw workspace",
+          workspacePath: projectDir,
+          totalTasks: state.tasks.length,
+        }),
+      );
       return;
     }
 
     // 5. POST /api/tasks/run
-    if (req.method === 'POST' && pathname === '/api/tasks/run') {
+    if (req.method === "POST" && pathname === "/api/tasks/run") {
       let body = {};
-      try { body = await parseJsonBody(req); } catch (e) {}
-      state.activeTaskModel = body?.model || process.env.NINEROUTER_TASK_MODEL || 'coding-fullstack';
+      try {
+        body = await parseJsonBody(req);
+      } catch (e) {}
+      state.activeTaskModel = body?.model || process.env.NINEROUTER_TASK_MODEL || DEFAULT_TASK_MODEL;
       if (body?.techStackConfig) {
         state.activeTechStackConfig = body.techStackConfig;
         if (state.activeProject) state.activeProject.techStackConfig = body.techStackConfig;
       }
 
       if (state.isRunning) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ message: 'Execution already running', isRunning: true, model: state.activeTaskModel }));
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ message: "Execution already running", isRunning: true, model: state.activeTaskModel }));
         return;
       }
 
       if (state.tasks.length === 0) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'No tasks to execute. Initialize a project first.' }));
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "No tasks to execute. Initialize a project first." }));
         return;
       }
 
@@ -1793,16 +2026,16 @@ const server = http.createServer(async (req, res) => {
       state.discoveredDependencies = {};
 
       broadcastLog(`🚀 OpenClaw Agent memulai eksekusi ${state.tasks.length} tasks menggunakan model: [${state.activeTaskModel}]...`);
-      broadcastEvent('run_started', { totalTasks: state.tasks.length, model: state.activeTaskModel });
+      broadcastEvent("run_started", { totalTasks: state.tasks.length, model: state.activeTaskModel });
 
       // ====================================================================
       // PHASE 0: Pre-scan + Foundation Scaffolding (runs BEFORE task loop)
       // ====================================================================
-      const projectId = state.activeProject ? state.activeProject.id : 'default-project';
+      const projectId = state.activeProject ? state.activeProject.id : "default-project";
       const projectDir = getActiveWorkspacePath(projectId);
       const ninerouterBase = process.env.NINEROUTER_API_BASE;
-      const ninerouterKey = process.env.NINEROUTER_API_KEY || 'sk-9router';
-      const ninerouterModel = state.activeTaskModel || process.env.NINEROUTER_TASK_MODEL || 'coding-prd';
+      const ninerouterKey = process.env.NINEROUTER_API_KEY;
+      const ninerouterModel = state.activeTaskModel || process.env.NINEROUTER_TASK_MODEL || DEFAULT_TASK_MODEL;
 
       // Run async pre-scan + scaffold then start loop
       (async () => {
@@ -1814,9 +2047,9 @@ const server = http.createServer(async (req, res) => {
           // [B] Scaffold all foundation files (tsconfig, tailwind, UI stubs, layout, etc.)
           scaffoldProjectFoundation(state.activeProject || { id: projectId, title: projectId }, projectDir, scanResult);
 
-          broadcastLog(`🏁 [Phase 0] Selesai! Memulai eksekusi ${state.tasks.length} tasks...`, 'success');
+          broadcastLog(`🏁 [Phase 0] Selesai! Memulai eksekusi ${state.tasks.length} tasks...`, "success");
         } catch (err) {
-          broadcastLog(`[Phase 0] Warning: ${err.message} - melanjutkan eksekusi tanpa pre-scan`, 'warn');
+          broadcastLog(`[Phase 0] Warning: ${err.message} - melanjutkan eksekusi tanpa pre-scan`, "warn");
           // Still scaffold even if pre-scan fails
           try {
             scaffoldProjectFoundation(state.activeProject || { id: projectId, title: projectId }, projectDir, {});
@@ -1827,50 +2060,51 @@ const server = http.createServer(async (req, res) => {
         runAgentLoop();
       })();
 
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, message: 'Agent execution started' }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, message: "Agent execution started" }));
       return;
     }
 
     // 6. POST /api/tasks/pause & POST /api/tasks/resume
-    if (req.method === 'POST' && pathname === '/api/tasks/pause') {
+    if (req.method === "POST" && pathname === "/api/tasks/pause") {
       state.isPaused = true;
-      broadcastLog('⏸️ OpenClaw Agent dijeda.');
-      broadcastEvent('run_paused', {});
-      res.writeHead(200, { 'Content-Type': 'application/json' });
+      broadcastLog("⏸️ OpenClaw Agent dijeda.");
+      broadcastEvent("run_paused", {});
+      res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ success: true, isPaused: true }));
       return;
     }
 
-    if (req.method === 'POST' && pathname === '/api/tasks/resume') {
+    if (req.method === "POST" && pathname === "/api/tasks/resume") {
       state.isPaused = false;
-      broadcastLog('▶️ OpenClaw Agent dilanjutkan.');
-      broadcastEvent('run_resumed', {});
-      res.writeHead(200, { 'Content-Type': 'application/json' });
+      broadcastLog("▶️ OpenClaw Agent dilanjutkan.");
+      broadcastEvent("run_resumed", {});
+      res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ success: true, isPaused: false }));
       return;
     }
 
     // 7. GET /api/tasks
-    if (req.method === 'GET' && pathname === '/api/tasks') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        tasks: state.tasks,
-        total: state.tasks.length,
-        completed: state.tasks.filter(t => t.status === 'done').length,
-        isRunning: state.isRunning,
-        isPaused: state.isPaused
-      }));
+    if (req.method === "GET" && pathname === "/api/tasks") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          tasks: state.tasks,
+          total: state.tasks.length,
+          completed: state.tasks.filter((t) => t.status === "done").length,
+          isRunning: state.isRunning,
+          isPaused: state.isPaused,
+        }),
+      );
       return;
     }
 
     // Default 404
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Endpoint not found' }));
-
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Endpoint not found" }));
   } catch (err) {
-    console.error('Server error:', err);
-    res.writeHead(500, { 'Content-Type': 'application/json' });
+    console.error("Server error:", err);
+    res.writeHead(500, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: err.message }));
   }
 });
@@ -1883,20 +2117,18 @@ async function generateTaskCodeWithCloudAi(project, task) {
   const openrouterKey = process.env.OPENROUTER_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
   const ninerouterBase = process.env.NINEROUTER_API_BASE;
-  const ninerouterKey = process.env.NINEROUTER_API_KEY || 'sk-9router';
-  const ninerouterModel = state.activeTaskModel || process.env.NINEROUTER_TASK_MODEL || 'coding-fullstack';
+  const ninerouterKey = process.env.NINEROUTER_API_KEY;
+  const ninerouterModel = state.activeTaskModel || process.env.NINEROUTER_TASK_MODEL || DEFAULT_TASK_MODEL;
 
-  const config = (project && project.techStackConfig) || state.activeTechStackConfig || { mode: 'html-prototype' };
-  const mode = config.mode || 'html-prototype';
+  const config = (project && project.techStackConfig) || state.activeTechStackConfig || { mode: "html-prototype" };
+  const mode = config.mode || "html-prototype";
 
   // [C] Context Injection — include already-created files
-  const createdFilesList = state.createdFiles.length > 0
-    ? `\n\nFiles already created in workspace (DO NOT overwrite or duplicate unnecessarily):\n${state.createdFiles.map(f => `- ${f}`).join('\n')}`
-    : '';
+  const createdFilesList = state.createdFiles.length > 0 ? `\n\nFiles already created in workspace (DO NOT overwrite or duplicate unnecessarily):\n${state.createdFiles.map((f) => `- ${f}`).join("\n")}` : "";
 
   // Dynamic Prompt Matrix based on chosen mode
-  let systemPrompt = '';
-  if (mode === 'html-prototype') {
+  let systemPrompt = "";
+  if (mode === "html-prototype") {
     systemPrompt = `You are a Principal Frontend UI Slicing Engineer specializing in clean, interactive HTML5, Tailwind CSS, and jQuery.
 Generate ONE complete, production-grade page or script for this task.
 
@@ -1912,7 +2144,7 @@ Return ONLY valid JSON:
   "code": "<!DOCTYPE html>...",
   "summary": "1-sentence summary of what this file implements"
 }`;
-  } else if (mode === 'laravel-monolith') {
+  } else if (mode === "laravel-monolith") {
     systemPrompt = `You are a Principal Laravel 11 Architect.
 Generate ONE complete PHP Controller, Eloquent Model, Blade View, or Migration for this task.
 
@@ -1927,11 +2159,11 @@ Return ONLY valid JSON:
   "code": "<?php\\nnamespace App\\\\Http\\\\Controllers;\\n...",
   "summary": "1-sentence summary of implementation"
 }`;
-  } else if (mode === 'decoupled-api') {
-    const isBackend = task.title.toLowerCase().includes('api') || task.title.toLowerCase().includes('endpoint') || task.phaseTitle?.toLowerCase().includes('backend') || task.phaseTitle?.toLowerCase().includes('database');
-    const backendEngine = config.backend || 'go-fiber';
+  } else if (mode === "decoupled-api") {
+    const isBackend = task.title.toLowerCase().includes("api") || task.title.toLowerCase().includes("endpoint") || task.phaseTitle?.toLowerCase().includes("backend") || task.phaseTitle?.toLowerCase().includes("database");
+    const backendEngine = config.backend || "go-fiber";
 
-    if (isBackend && backendEngine === 'go-fiber') {
+    if (isBackend && backendEngine === "go-fiber") {
       systemPrompt = `You are a Principal Golang Engineer building a Fiber/Gin REST API in 'backend/'.
 Generate ONE complete Go handler, model, or route file.
 File path should be inside 'backend/' (e.g. 'backend/handlers/xxx.go' or 'backend/models/xxx.go').${createdFilesList}
@@ -1973,13 +2205,13 @@ Return ONLY valid JSON:
 }`;
   }
 
-  const techStackStr = project && project.techStack ? project.techStack.map(t => `${t.name}: ${t.value}`).join(', ') : `${mode}`;
-  const userPrompt = `Project: "${project ? project.title : 'Application'}"
-Selected Architecture: ${mode} (${config.frontend || 'frontend'} + ${config.backend || 'backend'})
+  const techStackStr = project && project.techStack ? project.techStack.map((t) => `${t.name}: ${t.value}`).join(", ") : `${mode}`;
+  const userPrompt = `Project: "${project ? project.title : "Application"}"
+Selected Architecture: ${mode} (${config.frontend || "frontend"} + ${config.backend || "backend"})
 Task ID: ${task.id}
 Task Title: "${task.title}"
-Phase: "${task.phaseTitle || ''}"
-Sub-feature: "${task.subFeatureTitle || ''}"
+Phase: "${task.phaseTitle || ""}"
+Sub-feature: "${task.subFeatureTitle || ""}"
 
 Generate the complete, production-ready source code file for this specific task now:`;
 
@@ -1995,8 +2227,8 @@ Generate the complete, production-ready source code file for this specific task 
   }
 
   // 1. Try Gemini 3.7 / 2.5
-  if (geminiKey && !geminiKey.includes('YOUR_')) {
-    const models = ['gemini-3.7-flash', 'gemini-2.5-flash'];
+  if (geminiKey && !geminiKey.includes("YOUR_")) {
+    const models = ["gemini-3.7-flash", "gemini-2.5-flash"];
     for (const m of models) {
       try {
         const res = await callGeminiApi(geminiKey, m, systemPrompt, userPrompt);
@@ -2006,19 +2238,23 @@ Generate the complete, production-ready source code file for this specific task 
   }
 
   // 2. Try OpenRouter
-  if (openrouterKey && !openrouterKey.includes('YOUR_')) {
+  if (openrouterKey && !openrouterKey.includes("YOUR_")) {
     try {
-      const res = await callOpenRouterApi(openrouterKey, 'deepseek/deepseek-chat', systemPrompt, userPrompt);
+      const res = await callOpenRouterApi(openrouterKey, "deepseek/deepseek-chat", systemPrompt, userPrompt);
       if (res && res.filePath && res.code) return res;
     } catch (e) {}
   }
 
   // Fallback
-  const sanitized = task.title.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').slice(0, 30);
+  const sanitized = task.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 30);
   return {
     filePath: `src/tasks/${task.id}_${sanitized}.ts`,
-    code: `/**\n * Task: ${task.title}\n * Phase: ${task.phaseTitle || ''}\n * Generated by OpenClaw Autonomous Engine\n */\n\nexport async function execute_${task.id.replace(/-/g, '_')}() {\n  console.log('Executing ${task.title}...');\n  return { success: true, taskId: '${task.id}' };\n}\n`,
-    summary: `Created implementation for ${task.title}`
+    code: `/**\n * Task: ${task.title}\n * Phase: ${task.phaseTitle || ""}\n * Generated by OpenClaw Autonomous Engine\n */\n\nexport async function execute_${task.id.replace(/-/g, "_")}() {\n  console.log('Executing ${task.title}...');\n  return { success: true, taskId: '${task.id}' };\n}\n`,
+    summary: `Created implementation for ${task.title}`,
   };
 }
 
@@ -2032,21 +2268,21 @@ async function runAgentLoop() {
       continue;
     }
 
-    const nextTask = state.tasks.find(t => t.status === 'todo');
+    const nextTask = state.tasks.find((t) => t.status === "todo");
     if (!nextTask) {
       state.isRunning = false;
-      broadcastLog(`🎉 SEMUA TASK (${state.tasks.length}) TELAH SELESAI DIEKSEKUSI DI OPENCLAW WORKSPACE!`, 'success');
-      broadcastEvent('run_completed', { total: state.tasks.length });
+      broadcastLog(`🎉 SEMUA TASK (${state.tasks.length}) TELAH SELESAI DIEKSEKUSI DI OPENCLAW WORKSPACE!`, "success");
+      broadcastEvent("run_completed", { total: state.tasks.length });
       break;
     }
 
     // Step 1: Set task to "progress"
-    nextTask.status = 'progress';
+    nextTask.status = "progress";
     broadcastLog(`[Task ${nextTask.id}] Mulai pengerjaan: "${nextTask.title}" (${nextTask.phaseTitle})`);
-    broadcastEvent('task_updated', { task: nextTask });
+    broadcastEvent("task_updated", { task: nextTask });
 
     // Step 2: Cloud AI Code Generation
-    const activeModel = state.activeTaskModel || process.env.NINEROUTER_TASK_MODEL || 'coding-fullstack';
+    const activeModel = state.activeTaskModel || process.env.NINEROUTER_TASK_MODEL || DEFAULT_TASK_MODEL;
     const taskNum = state.createdFiles.length;
     broadcastLog(`[Task ${nextTask.id}] 🧠 Merancang kode dengan [${activeModel}] (context: ${taskNum} files tersedia)...`);
     let fileResult = null;
@@ -2057,15 +2293,15 @@ async function runAgentLoop() {
     }
 
     // Step 3: Write code to real workspace file
-    const projectDir = getActiveWorkspacePath(state.activeProject ? state.activeProject.id : 'default-project');
+    const projectDir = getActiveWorkspacePath(state.activeProject ? state.activeProject.id : "default-project");
     if (fileResult && fileResult.filePath && fileResult.code) {
       const targetPath = path.join(projectDir, fileResult.filePath);
       const parentDir = path.dirname(targetPath);
       if (!fs.existsSync(parentDir)) {
         fs.mkdirSync(parentDir, { recursive: true });
       }
-      fs.writeFileSync(targetPath, fileResult.code, 'utf-8');
-      broadcastLog(`[Task ${nextTask.id}] 📝 Berhasil membuat file: ${fileResult.filePath} (${fileResult.summary || 'OK'})`, 'info');
+      fs.writeFileSync(targetPath, fileResult.code, "utf-8");
+      broadcastLog(`[Task ${nextTask.id}] 📝 Berhasil membuat file: ${fileResult.filePath} (${fileResult.summary || "OK"})`, "info");
       // [C] Track created files for context injection
       if (!state.createdFiles.includes(fileResult.filePath)) {
         state.createdFiles.push(fileResult.filePath);
@@ -2076,32 +2312,50 @@ async function runAgentLoop() {
     const generatedLogPath = path.join(projectDir, `task_${nextTask.id}.log`);
     fs.writeFileSync(
       generatedLogPath,
-      `OpenClaw Cloud AI Execution Log\nTask: ${nextTask.title}\nPhase: ${nextTask.phaseTitle}\nFile Generated: ${fileResult ? fileResult.filePath : 'N/A'}\nTimestamp: ${new Date().toISOString()}\nStatus: PASSED\n`
+      `OpenClaw Cloud AI Execution Log\nTask: ${nextTask.title}\nPhase: ${nextTask.phaseTitle}\nFile Generated: ${fileResult ? fileResult.filePath : "N/A"}\nTimestamp: ${new Date().toISOString()}\nStatus: PASSED\n`,
     );
 
     // Step 4: Mark task as "done"
-    nextTask.status = 'done';
-    broadcastLog(`✅ [Task ${nextTask.id}] Selesai: "${nextTask.title}"`, 'success');
-    broadcastEvent('task_updated', { task: nextTask });
+    nextTask.status = "done";
+    broadcastLog(`✅ [Task ${nextTask.id}] Selesai: "${nextTask.title}"`, "success");
+    broadcastEvent("task_updated", { task: nextTask });
 
     await sleep(600);
   }
 }
 
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Start Server
-server.listen(PORT, () => {
-  console.log(`=======================================================`);
-  console.log(`🤖 OpenClaw Production Server running on http://localhost:${PORT}`);
-  console.log(`📁 Target Workspace: ${OPENCLAW_WORKSPACE_DIR}`);
-  console.log(`🔑 9Router Gateway: ${process.env.NINEROUTER_API_BASE ? `Active ✅ (${process.env.NINEROUTER_API_BASE})` : 'Disabled'}`);
-  console.log(`   📋 PRD Generator Model: ${process.env.NINEROUTER_PRD_MODEL || 'coding-prd'}`);
-  console.log(`   ⚡ Implementation Model: ${process.env.NINEROUTER_TASK_MODEL || 'coding-fullstack'}`);
-  console.log(`🔑 Gemini Key: ${process.env.GEMINI_API_KEY ? 'Active ✅' : 'Missing'}`);
-  console.log(`🔑 OpenAI Key: ${process.env.OPENAI_API_KEY ? 'Active ✅' : 'Missing'}`);
-  console.log(`🔑 OpenRouter Key: ${process.env.OPENROUTER_API_KEY ? 'Active ✅' : 'Missing'}`);
-  console.log(`=======================================================`);
-});
+function startServer(port = PORT) {
+  return server.listen(port, () => {
+    console.log(`=======================================================`);
+    console.log(`🤖 OpenClaw Production Server running on http://localhost:${port}`);
+    console.log(`📁 Target Workspace: ${OPENCLAW_WORKSPACE_DIR}`);
+    console.log(`🔑 9Router Gateway: ${process.env.NINEROUTER_API_BASE ? `Active ✅ (${process.env.NINEROUTER_API_BASE})` : "Disabled"}`);
+    console.log(`   📋 PRD Generator Model: ${process.env.NINEROUTER_PRD_MODEL || DEFAULT_PRD_MODEL}`);
+    console.log(`   ⚡ Implementation Model: ${process.env.NINEROUTER_TASK_MODEL || DEFAULT_TASK_MODEL}`);
+    console.log(`   ⏱️ Gateway Timeout: ${getNineRouterTimeoutMs()} ms`);
+    console.log(`🔑 Gemini Key: ${process.env.GEMINI_API_KEY ? "Active ✅" : "Missing"}`);
+    console.log(`🔑 OpenAI Key: ${process.env.OPENAI_API_KEY ? "Active ✅" : "Missing"}`);
+    console.log(`🔑 OpenRouter Key: ${process.env.OPENROUTER_API_KEY ? "Active ✅" : "Missing"}`);
+    console.log(`=======================================================`);
+  });
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = {
+  server,
+  startServer,
+  callNineRouterApi,
+  parseNineRouterContent,
+  getNineRouterTimeoutMs,
+  DEFAULT_NINEROUTER_TIMEOUT_MS,
+  DEFAULT_PRD_MODEL,
+  DEFAULT_TASK_MODEL,
+};
